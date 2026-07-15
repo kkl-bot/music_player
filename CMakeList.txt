@@ -9,10 +9,16 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Core Gui Widgets REQUIRED)
-find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core Gui Widgets REQUIRED)
-
 add_executable(${PROJECT_NAME}
+    src/main.cpp
+    src/mainwindow.cpp
+    src/subtitleplayer.cpp
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets REQUIRED)
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets REQUIRED)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE
+Qt${QT_VERSION_MAJOR}::Widgets
+Qt${QT_VERSION_MAJOR}::Multimedia
+Qt${QT_VERSION_MAJOR}::MultimediaWidgets)
