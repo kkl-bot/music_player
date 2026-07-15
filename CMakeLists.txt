@@ -23,7 +23,7 @@ set(SOURCES
     src/playlist.cpp
     src/playtrack.cpp
     src/song.cpp
-    src/subtitleplayer.cpp
+    src/lyricsdecoder.cpp
     src/library.cpp
 )
 
@@ -33,7 +33,7 @@ set(HEADERS
     src/playlist.h
     src/playtrack.h
     src/song.h
-    src/subtitleplayer.h
+    src/lyricsdecoder.h
     src/library.h
 )
 

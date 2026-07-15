@@ -4,11 +4,13 @@
 // ── QSettings 键名 ──
 static const QString kKeyLastFolder    = QStringLiteral("lastFolder");
 static const QString kKeyPlaylist      = QStringLiteral("playlist/songs");
+static const QString kKeyPlaylistTitles = QStringLiteral("playlist/titles");
 static const QString kKeyCurrentIndex  = QStringLiteral("playlist/currentIndex");
 static const QString kKeyVolume        = QStringLiteral("audio/volume");
 static const QString kKeyMuted         = QStringLiteral("audio/muted");
 static const QString kKeyRepeatMode    = QStringLiteral("playback/repeatMode");
 static const QString kKeyShuffle       = QStringLiteral("playback/shuffle");
+static const QString kKeyLastPlayedSong = QStringLiteral("playback/lastPlayedSong");
 static const QString kKeyWindowGeom    = QStringLiteral("window/geometry");
 
 static const int kMaxRecentPositions = 50;  // 最多记住 50 首歌的位置
@@ -46,12 +48,16 @@ QString Library::loadLastFolder() const
 
 void Library::savePlaylist(const QList<Song> &songs, int currentIndex)
 {
-    QStringList paths;
+    QStringList paths, titles;
     paths.reserve(songs.size());
-    for (const auto &song : songs)
+    titles.reserve(songs.size());
+    for (const auto &song : songs) {
         paths.append(song.filePath);
+        titles.append(song.title);
+    }
 
     m_settings.setValue(kKeyPlaylist, paths);
+    m_settings.setValue(kKeyPlaylistTitles, titles);
     m_settings.setValue(kKeyCurrentIndex, currentIndex);
     m_settings.sync();
 }
@@ -60,13 +66,22 @@ QList<Song> Library::loadPlaylist(int &outCurrentIndex) const
 {
     outCurrentIndex = m_settings.value(kKeyCurrentIndex, -1).toInt();
 
-    const QStringList paths = m_settings.value(kKeyPlaylist).toStringList();
+    const QStringList paths  = m_settings.value(kKeyPlaylist).toStringList();
+    const QStringList titles = m_settings.value(kKeyPlaylistTitles).toStringList();
+
     QList<Song> songs;
     songs.reserve(paths.size());
 
-    for (const auto &path : paths) {
-        if (QFileInfo::exists(path))
-            songs.append(Song(path));
+    for (int i = 0; i < paths.size(); ++i) {
+        const QString &path = paths.at(i);
+        if (!QFileInfo::exists(path))
+            continue;
+
+        Song song(path);
+        // 恢复保存的标题（不是文件名 completeBaseName）
+        if (i < titles.size() && !titles.at(i).isEmpty())
+            song.title = titles.at(i);
+        songs.append(song);
     }
 
     // 修正越界的索引
@@ -129,6 +144,21 @@ bool Library::loadShuffle(bool defaultShuffle) const
 }
 
 // ════════════════════════════════════════════════════════════
+//  上次播放的歌曲
+// ════════════════════════════════════════════════════════════
+
+void Library::saveLastPlayedSong(const QString &songPath)
+{
+    m_settings.setValue(kKeyLastPlayedSong, songPath);
+    m_settings.sync();
+}
+
+QString Library::loadLastPlayedSong() const
+{
+    return m_settings.value(kKeyLastPlayedSong).toString();
+}
+
+// ════════════════════════════════════════════════════════════
 //  上次播放位置
 // ════════════════════════════════════════════════════════════
 
@@ -151,6 +181,23 @@ qint64 Library::loadLastPosition(const QString &songPath) const
 {
     const QString key = QStringLiteral("position/") + songPath;
     return static_cast<qint64>(m_settings.value(key, 0).toLongLong());
+}
+
+// ════════════════════════════════════════════════════════════
+//  歌词时间微调偏移
+// ════════════════════════════════════════════════════════════
+
+void Library::saveLyricsOffset(const QString &songPath, qint64 offsetMs)
+{
+    const QString key = QStringLiteral("lyricsoffset/") + songPath;
+    m_settings.setValue(key, static_cast<qlonglong>(offsetMs));
+    m_settings.sync();
+}
+
+qint64 Library::loadLyricsOffset(const QString &songPath, qint64 defaultOffset) const
+{
+    const QString key = QStringLiteral("lyricsoffset/") + songPath;
+    return static_cast<qint64>(m_settings.value(key, static_cast<qlonglong>(defaultOffset)).toLongLong());
 }
 
 // ════════════════════════════════════════════════════════════

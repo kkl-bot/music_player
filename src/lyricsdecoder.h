@@ -1,5 +1,5 @@
-#ifndef SUBTITLEPLAYER_H
-#define SUBTITLEPLAYER_H
+#ifndef LYRICSDECODER_H
+#define LYRICSDECODER_H
 
 #include <QObject>
 #include <QString>
@@ -7,13 +7,13 @@
 #include <QMap>
 #include <QTime>
 
-/// SubtitlePlayer - LRC 歌词解析器
+/// LyricsDecoder - LRC 歌词解析器
 ///
 /// 支持标准 LRC 格式：
 ///   [mm:ss.xx]歌词文本
 ///   [mm:ss]歌词文本
 ///   [ti:标题] [ar:艺人] [al:专辑] [offset:±ms]
-class SubtitlePlayer : public QObject
+class LyricsDecoder : public QObject
 {
     Q_OBJECT
 
@@ -25,8 +25,8 @@ public:
         QString text;           // 歌词文本
     };
 
-    explicit SubtitlePlayer(QObject *parent = nullptr);
-    ~SubtitlePlayer() override;
+    explicit LyricsDecoder(QObject *parent = nullptr);
+    ~LyricsDecoder() override;
 
     // ── 加载 ──
     /// 从文件加载 LRC 歌词
@@ -61,8 +61,16 @@ public:
     QString artist() const { return m_artist; }
     QString album()  const { return m_album; }
 
-    /// 全局时间偏移（毫秒），正数=延后，负数=提前
+    /// LRC 头部声明的全局时间偏移（毫秒），正数=延后，负数=提前
     qint64 offset() const { return m_offsetMs; }
+
+    /// 用户手动微调偏移（毫秒），叠加在 offset() 之上
+    qint64 userOffset() const { return m_userOffsetMs; }
+    void setUserOffset(qint64 ms);
+    void adjustUserOffset(qint64 deltaMs);
+
+    /// 总偏移 = offset() + userOffset()
+    qint64 totalOffset() const { return m_offsetMs + m_userOffsetMs; }
 
 signals:
     void subtitleChanged(const QString &text);
@@ -82,7 +90,8 @@ private:
     QString m_title;
     QString m_artist;
     QString m_album;
-    qint64  m_offsetMs = 0;   // 来自 [offset:±ms]
+    qint64  m_offsetMs     = 0;   // 来自 [offset:±ms]
+    qint64  m_userOffsetMs = 0;   // 用户手动微调
 };
 
-#endif // SUBTITLEPLAYER_H
+#endif // LYRICSDECODER_H

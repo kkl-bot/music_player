@@ -210,6 +210,7 @@ void Player::onMediaStatusChanged(QMediaPlayer::MediaStatus status)
     switch (status) {
     case QMediaPlayer::LoadedMedia:
         emit durationChanged(m_mediaPlayer->duration());
+        emit mediaLoaded();
         break;
     case QMediaPlayer::InvalidMedia:
         emit errorOccurred(QStringLiteral("无法加载媒体文件: ") + m_mediaPlayer->source().toString());

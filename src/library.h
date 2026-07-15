@@ -52,9 +52,17 @@ public:
     void saveShuffle(bool enabled);
     bool loadShuffle(bool defaultShuffle = false) const;
 
+    // ── 上次播放的歌曲路径 ──
+    void saveLastPlayedSong(const QString &songPath);
+    QString loadLastPlayedSong() const;
+
     // ── 上次播放位置（按歌曲路径索引） ──
     void saveLastPosition(const QString &songPath, qint64 positionMs);
     qint64 loadLastPosition(const QString &songPath) const;
+
+    // ── 歌词时间微调偏移（按歌曲路径索引） ──
+    void saveLyricsOffset(const QString &songPath, qint64 offsetMs);
+    qint64 loadLyricsOffset(const QString &songPath, qint64 defaultOffset = 0) const;
 
     // ── 窗口几何 ──
     void saveWindowGeometry(const QByteArray &geometry);

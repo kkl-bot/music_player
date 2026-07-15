@@ -69,6 +69,9 @@ signals:
     void mutedChanged(bool muted);
     void errorOccurred(const QString &errorString);
 
+    /// 媒体加载完成（可安全 seek）
+    void mediaLoaded();
+
     /// 元数据变更（艺术家、封面等就绪时发射）
     void metaDataChanged();
     void artistChanged(const QString &artist);

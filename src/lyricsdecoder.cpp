@@ -1,4 +1,4 @@
-#include "subtitleplayer.h"
+#include "lyricsdecoder.h"
 
 #include <QFile>
 #include <QTextStream>
@@ -9,18 +9,18 @@
 //  构造 / 析构
 // ════════════════════════════════════════════════════════════
 
-SubtitlePlayer::SubtitlePlayer(QObject *parent)
+LyricsDecoder::LyricsDecoder(QObject *parent)
     : QObject(parent)
 {
 }
 
-SubtitlePlayer::~SubtitlePlayer() = default;
+LyricsDecoder::~LyricsDecoder() = default;
 
 // ════════════════════════════════════════════════════════════
 //  加载
 // ════════════════════════════════════════════════════════════
 
-bool SubtitlePlayer::load(const QString &filePath)
+bool LyricsDecoder::load(const QString &filePath)
 {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
@@ -39,7 +39,7 @@ bool SubtitlePlayer::load(const QString &filePath)
     return loadFromData(content);
 }
 
-bool SubtitlePlayer::loadFromData(const QString &lrcData)
+bool LyricsDecoder::loadFromData(const QString &lrcData)
 {
     clear();
 
@@ -66,31 +66,44 @@ bool SubtitlePlayer::loadFromData(const QString &lrcData)
     return !m_lyrics.isEmpty();
 }
 
-void SubtitlePlayer::clear()
+void LyricsDecoder::clear()
 {
     m_lyrics.clear();
     m_title.clear();
     m_artist.clear();
     m_album.clear();
-    m_offsetMs = 0;
+    m_offsetMs     = 0;
+    m_userOffsetMs = 0;
 }
 
 // ════════════════════════════════════════════════════════════
 //  查询
 // ════════════════════════════════════════════════════════════
 
-QString SubtitlePlayer::getSubtitleAt(qint64 positionMs) const
+QString LyricsDecoder::getSubtitleAt(qint64 positionMs) const
 {
     const int idx = lineIndexAt(positionMs);
     return (idx >= 0) ? m_lyrics.at(idx).text : QString();
 }
 
-int SubtitlePlayer::lineIndexAt(qint64 positionMs) const
+void LyricsDecoder::setUserOffset(qint64 ms)
+{
+    if (m_userOffsetMs != ms) {
+        m_userOffsetMs = ms;
+    }
+}
+
+void LyricsDecoder::adjustUserOffset(qint64 deltaMs)
+{
+    m_userOffsetMs += deltaMs;
+}
+
+int LyricsDecoder::lineIndexAt(qint64 positionMs) const
 {
     if (m_lyrics.isEmpty())
         return -1;
 
-    const qint64 adjusted = positionMs - m_offsetMs;
+    const qint64 adjusted = positionMs - (m_offsetMs + m_userOffsetMs);
 
     // 二分查找
     int lo = 0, hi = m_lyrics.size() - 1;
@@ -108,17 +121,17 @@ int SubtitlePlayer::lineIndexAt(qint64 positionMs) const
     return -1;
 }
 
-SubtitlePlayer::LyricLine SubtitlePlayer::lineAt(int index) const
+LyricsDecoder::LyricLine LyricsDecoder::lineAt(int index) const
 {
     return m_lyrics.value(index);
 }
 
-int SubtitlePlayer::lineCount() const
+int LyricsDecoder::lineCount() const
 {
     return m_lyrics.size();
 }
 
-bool SubtitlePlayer::isLoaded() const
+bool LyricsDecoder::isLoaded() const
 {
     return !m_lyrics.isEmpty();
 }
@@ -127,7 +140,7 @@ bool SubtitlePlayer::isLoaded() const
 //  内部 — 解析一行 LRC
 // ════════════════════════════════════════════════════════════
 
-void SubtitlePlayer::parseLine(const QString &line, int /*lineNumber*/)
+void LyricsDecoder::parseLine(const QString &line, int /*lineNumber*/)
 {
     if (line.trimmed().isEmpty())
         return;
@@ -181,7 +194,7 @@ void SubtitlePlayer::parseLine(const QString &line, int /*lineNumber*/)
     }
 }
 
-bool SubtitlePlayer::parseTimestamp(const QString &tag, qint64 &outMs) const
+bool LyricsDecoder::parseTimestamp(const QString &tag, qint64 &outMs) const
 {
     // 支持格式: [mm:ss] 或 [mm:ss.xx] 或 [mm:ss.xxx]
     static const QRegularExpression kPattern(R"((\d{1,3}):(\d{2})(?:\.(\d{1,3}))?)");

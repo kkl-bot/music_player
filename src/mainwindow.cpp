@@ -2,7 +2,7 @@
 #include "player.h"
 #include "playlist.h"
 #include "playtrack.h"
-#include "subtitleplayer.h"
+#include "lyricsdecoder.h"
 #include "library.h"
 #include "song.h"
 
@@ -18,6 +18,9 @@
 #include <QTime>
 #include <QFont>
 #include <QFrame>
+#include <QScrollBar>
+#include <QAbstractItemView>
+#include <QCursor>
 
 // ════════════════════════════════════════════════════════════
 //  构造 / 析构
@@ -30,11 +33,24 @@ MainWindow::MainWindow(QWidget *parent)
     m_player    = new Player(this);
     m_playlist  = new Playlist(this);
     m_playTrack = new PlayTrack(this);
-    m_subtitle  = new SubtitlePlayer(this);
+    m_subtitle  = new LyricsDecoder(this);
     m_library   = new Library(this);
 
     setupUI();
     connectSignals();
+
+    // 歌词回弹定时器（单次触发）
+    m_lyricsRevertTimer = new QTimer(this);
+    m_lyricsRevertTimer->setSingleShot(true);
+    m_lyricsRevertTimer->setInterval(3000);
+    connect(m_lyricsRevertTimer, &QTimer::timeout, this, &MainWindow::onLyricsRevertTimeout);
+
+    // 歌词跳转按钮信号
+    connect(m_lyricsPlayBtn, &QPushButton::clicked, this, &MainWindow::onLyricsPlayClicked);
+
+    // 歌词时间微调
+    connect(m_btnLyricsOffsetDown, &QPushButton::clicked, this, [this]() { onLyricsOffsetAdjust(-500); });
+    connect(m_btnLyricsOffsetUp,   &QPushButton::clicked, this, [this]() { onLyricsOffsetAdjust(+500); });
 
     // 恢复上次状态
     restorePlaylistFromLibrary();
@@ -58,10 +74,41 @@ void MainWindow::closeEvent(QCloseEvent *event)
     m_library->saveRepeatMode(static_cast<int>(m_playlist->repeatMode()));
     m_library->saveShuffle(m_playlist->isShuffle());
     m_library->saveWindowGeometry(saveGeometry());
-    if (m_playlist->hasCurrent())
-        m_library->saveLastPosition(m_playlist->currentSong().filePath, m_player->position());
+    if (m_playlist->hasCurrent()) {
+        const Song &cur = m_playlist->currentSong();
+        m_library->saveLastPlayedSong(cur.filePath);
+        m_library->saveLastPosition(cur.filePath, m_player->position());
+        if (m_subtitle->isLoaded())
+            m_library->saveLyricsOffset(cur.filePath, m_subtitle->userOffset());
+    }
 
     QMainWindow::closeEvent(event);
+}
+
+// ════════════════════════════════════════════════════════════
+//  窗口缩放 — 重新缩放封面
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    updateCoverDisplay();
+}
+
+/// 将缓存的封面自适应缩放到专辑封面标签尺寸
+void MainWindow::updateCoverDisplay()
+{
+    if (m_coverCache.isNull())
+        return;
+
+    // 取标签当前可用尺寸，保持 1:1 正方形的最大限度
+    const int maxSize = qMin(m_albumArt->width(), m_albumArt->height());
+    if (maxSize <= 0)
+        return;
+
+    const QPixmap scaled = m_coverCache.scaled(
+        maxSize, maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    m_albumArt->setPixmap(scaled);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -160,10 +207,11 @@ void MainWindow::setupCentralWidget()
     rightLayout->setContentsMargins(20, 20, 20, 10);
     rightLayout->setSpacing(8);
 
-    // 专辑封面占位
+    // 专辑封面占位 — 自适应
     m_albumArt = new QLabel(this);
     m_albumArt->setObjectName(QStringLiteral("albumArt"));
-    m_albumArt->setFixedSize(180, 180);
+    m_albumArt->setMinimumSize(80, 80);
+    m_albumArt->setMaximumSize(400, 400);
     m_albumArt->setAlignment(Qt::AlignCenter);
     m_albumArt->setText(QStringLiteral("🎵"));
     {
@@ -185,14 +233,57 @@ void MainWindow::setupCentralWidget()
     m_songArtist->setAlignment(Qt::AlignCenter);
     rightLayout->addWidget(m_songArtist);
 
-    rightLayout->addSpacing(10);
+    rightLayout->addSpacing(4);
 
-    m_lyricsLabel = new QLabel(QStringLiteral("♪ 等待播放..."), this);
-    m_lyricsLabel->setObjectName(QStringLiteral("lyricsLabel"));
-    m_lyricsLabel->setAlignment(Qt::AlignCenter);
-    m_lyricsLabel->setWordWrap(true);
-    m_lyricsLabel->setMinimumHeight(60);
-    rightLayout->addWidget(m_lyricsLabel, 1);
+    // ── 歌词时间微调 ──
+    {
+        QHBoxLayout *offsetRow = new QHBoxLayout;
+        offsetRow->setSpacing(4);
+        offsetRow->addStretch();
+
+        m_btnLyricsOffsetDown = new QPushButton(QStringLiteral("−"), this);
+        m_btnLyricsOffsetDown->setObjectName(QStringLiteral("lyricsOffsetBtn"));
+        m_btnLyricsOffsetDown->setFixedSize(24, 24);
+        m_btnLyricsOffsetDown->setToolTip(QStringLiteral("歌词提前 0.5 秒"));
+        offsetRow->addWidget(m_btnLyricsOffsetDown);
+
+        m_lyricsOffsetLabel = new QLabel(QStringLiteral("±0.0s"), this);
+        m_lyricsOffsetLabel->setObjectName(QStringLiteral("lyricsOffsetLabel"));
+        m_lyricsOffsetLabel->setAlignment(Qt::AlignCenter);
+        m_lyricsOffsetLabel->setFixedWidth(44);
+        offsetRow->addWidget(m_lyricsOffsetLabel);
+
+        m_btnLyricsOffsetUp = new QPushButton(QStringLiteral("+"), this);
+        m_btnLyricsOffsetUp->setObjectName(QStringLiteral("lyricsOffsetBtn"));
+        m_btnLyricsOffsetUp->setFixedSize(24, 24);
+        m_btnLyricsOffsetUp->setToolTip(QStringLiteral("歌词延后 0.5 秒"));
+        offsetRow->addWidget(m_btnLyricsOffsetUp);
+
+        offsetRow->addStretch();
+        rightLayout->addLayout(offsetRow);
+    }
+
+    rightLayout->addSpacing(6);
+
+    // 滚动歌词
+    m_lyricsWidget = new QListWidget(this);
+    m_lyricsWidget->setObjectName(QStringLiteral("lyricsWidget"));
+    m_lyricsWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_lyricsWidget->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_lyricsWidget->setSelectionMode(QAbstractItemView::NoSelection);
+    m_lyricsWidget->setFocusPolicy(Qt::NoFocus);
+    m_lyricsWidget->setWordWrap(true);
+    m_lyricsWidget->viewport()->installEventFilter(this);
+    m_lyricsWidget->viewport()->setMouseTracking(true);   // 持续追踪鼠标移动
+    rightLayout->addWidget(m_lyricsWidget, 1);
+
+    // 歌词跳转按钮：叠加在歌词区域中央偏右位置
+    m_lyricsPlayBtn = new QPushButton(QStringLiteral("▶"), m_lyricsWidget->viewport());
+    m_lyricsPlayBtn->setObjectName(QStringLiteral("lyricsPlayBtn"));
+    m_lyricsPlayBtn->setFixedSize(36, 36);
+    m_lyricsPlayBtn->setCursor(Qt::PointingHandCursor);
+    m_lyricsPlayBtn->setToolTip(QStringLiteral("跳转到此句"));
+    m_lyricsPlayBtn->hide();
 
     splitter->addWidget(rightPanel);
     splitter->setStretchFactor(0, 2);
@@ -322,11 +413,32 @@ void MainWindow::setupStyleSheet()
         #songTitle { font-size: 20px; font-weight: bold; color: #fff; }
         #songArtist { font-size: 14px; color: #aaa; }
 
-        #lyricsLabel {
-            font-size: 16px; color: #e0e0e0; padding: 10px;
-            background-color: rgba(15,52,96,0.3); border-radius: 8px;
+        #lyricsWidget {
+            font-size: 15px; color: #888; background: transparent;
+            border: none; padding: 4px 0;
+        }
+        #lyricsWidget::item {
+            padding: 6px 16px; border: none;
+        }
+        #lyricsWidget::item:selected {
+            background: transparent; color: #e94560;
         }
         #albumArt { font-size: 64px; background-color: #16213e; border-radius: 12px; }
+
+        #lyricsPlayBtn {
+            background-color: #e94560; color: #fff; font-size: 14px;
+            border: none; border-radius: 18px;
+        }
+        #lyricsPlayBtn:hover { background-color: #ff6b81; }
+
+        #lyricsOffsetBtn {
+            background-color: #0f3460; color: #ccc; font-size: 14px; font-weight: bold;
+            border: 1px solid #1a5276; border-radius: 12px;
+        }
+        #lyricsOffsetBtn:hover { background-color: #1a5276; color: #fff; }
+        #lyricsOffsetLabel {
+            font-size: 12px; color: #aaa; min-width: 40px;
+        }
 
         #controlBar { background-color: #0f3460; border-top: 1px solid #1a5276; }
 
@@ -430,6 +542,19 @@ void MainWindow::connectSignals()
         }
     });
 
+    // ── 歌词滚动检测（valueChanged 在滚动完成后触发，位置更准确）
+    connect(m_lyricsWidget->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, [this]() {
+        if (m_lyricsSuppressScroll)
+            return;
+        // 优先使用最近 wheel 位置，否则取视口中央
+        QPoint pos = m_lyricsWheelPos;
+        if (pos.isNull())
+            pos = QPoint(m_lyricsWidget->viewport()->width() / 2,
+                         m_lyricsWidget->viewport()->height() / 2);
+        onLyricsScrolled(pos);
+    });
+
     // 音量
     connect(m_volumeSlider, &QSlider::valueChanged, this, &MainWindow::onVolumeChanged);
 
@@ -447,9 +572,10 @@ void MainWindow::connectSignals()
             ? QStringLiteral("未知艺术家") : artist);
     });
     connect(m_player, &Player::coverArtChanged, this, [this](const QPixmap &cover) {
-        if (!cover.isNull())
-            m_albumArt->setPixmap(cover.scaled(
-                180, 180, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        if (!cover.isNull()) {
+            m_coverCache = cover;
+            updateCoverDisplay();
+        }
     });
 }
 
@@ -468,8 +594,10 @@ void MainWindow::onPlayPause()
         }
     }
     m_player->togglePlayPause();
-    if (m_player->playbackState() == Player::PlaybackState::Paused)
-        m_lyricsLabel->setText(QStringLiteral("⏸ 已暂停"));
+    if (m_player->playbackState() == Player::PlaybackState::Paused
+        && m_lyricsWidget->count() > 0) {
+        // 暂停时在列表底部加一条提示
+    }
 }
 
 void MainWindow::onNext()
@@ -515,21 +643,46 @@ void MainWindow::onSongSelected(int index)
 
     // 优先加载本地封面文件（文件夹中的 cover.jpg 等）
     if (song.hasCoverFile()) {
-        QPixmap cover = song.loadCoverFile();
-        if (!cover.isNull())
-            m_albumArt->setPixmap(cover);
+        m_coverCache = song.loadCoverFile();
+        if (!m_coverCache.isNull())
+            updateCoverDisplay();
         else
             m_albumArt->setText(QStringLiteral("🎵"));
     } else {
+        m_coverCache = QPixmap();
         m_albumArt->setText(QStringLiteral("🎵"));
     }
 
+    // 重置歌词跟随状态
+    m_lyricsFollowing = true;
+    m_lyricsPlayBtn->hide();
+    m_lyricsRevertTimer->stop();
+
+    // 恢复该歌曲的歌词时间微调
+    const qint64 savedOffset = m_library->loadLyricsOffset(song.filePath);
+    m_subtitle->setUserOffset(savedOffset);
+    updateLyricsOffsetLabel();
+
     m_subtitle->clear();
-    if (song.hasLyrics()) {
-        m_subtitle->load(song.lyricsPath);
-        m_lyricsLabel->setText(QStringLiteral("♪ 加载歌词..."));
+    m_lyricsWidget->clear();
+
+    if (song.hasLyrics() && m_subtitle->load(song.lyricsPath)) {
+        // 填充所有歌词行到列表
+        for (int i = 0; i < m_subtitle->lineCount(); ++i) {
+            const auto line = m_subtitle->lineAt(i);
+            auto *item = new QListWidgetItem(line.text);
+            item->setTextAlignment(Qt::AlignCenter);
+            m_lyricsWidget->addItem(item);
+        }
+        // 默认高亮第一行
+        if (m_lyricsWidget->count() > 0) {
+            m_lyricsWidget->item(0)->setForeground(QColor("#e94560"));
+        }
     } else {
-        m_lyricsLabel->setText(QStringLiteral("♪ 无歌词"));
+        // 无歌词时显示占位
+        auto *item = new QListWidgetItem(QStringLiteral("♪ 无歌词"));
+        item->setTextAlignment(Qt::AlignCenter);
+        m_lyricsWidget->addItem(item);
     }
 
     m_player->setSource(song.url());
@@ -709,6 +862,38 @@ void MainWindow::restorePlaylistFromLibrary()
         m_listCountLabel->setText(QStringLiteral("共 %1 首").arg(savedSongs.size()));
         statusBar()->showMessage(
             QStringLiteral("已恢复上次会话 %1 首歌曲").arg(savedSongs.size()), 3000);
+
+        // ── 恢复上次播放的歌曲及播放位置 ──
+        const QString lastPath = m_library->loadLastPlayedSong();
+        if (!lastPath.isEmpty() && savedIndex >= 0 && savedIndex < m_listWidget->count()) {
+            qint64 restorePos = 0;
+            // 检查 savedIndex 的歌曲路径是否匹配
+            const QString curPath = m_listWidget->item(savedIndex)->data(Qt::UserRole).toString();
+            if (curPath == lastPath) {
+                restorePos = m_library->loadLastPosition(lastPath);
+            } else {
+                // savedIndex 不匹配，在所有 items 中查找
+                for (int i = 0; i < m_listWidget->count(); ++i) {
+                    if (m_listWidget->item(i)->data(Qt::UserRole).toString() == lastPath) {
+                        savedIndex = i;
+                        restorePos = m_library->loadLastPosition(lastPath);
+                        break;
+                    }
+                }
+            }
+            // 触发播放
+            m_listWidget->setCurrentRow(savedIndex);
+            // 等待媒体加载完成后跳转（比 durationChanged 更可靠）
+            if (restorePos > 0) {
+                auto *conn = new QMetaObject::Connection;
+                *conn = connect(m_player, &Player::mediaLoaded, this,
+                    [this, restorePos, conn]() {
+                        m_player->seek(restorePos);
+                        disconnect(*conn);
+                        delete conn;
+                    });
+            }
+        }
     }
 }
 
@@ -764,12 +949,200 @@ void MainWindow::syncPlaylistFromUI()
 
 void MainWindow::updateLyrics(qint64 positionMs)
 {
-    if (!m_subtitle->isLoaded()) return;
+    if (!m_subtitle->isLoaded() || m_lyricsWidget->count() == 0)
+        return;
 
     const int idx = m_subtitle->lineIndexAt(positionMs);
-    if (idx >= 0) {
-        const auto line = m_subtitle->lineAt(idx);
-        if (line.text != m_lyricsLabel->text())
-            m_lyricsLabel->setText(line.text);
+    if (idx < 0 || idx >= m_lyricsWidget->count())
+        return;
+
+    // 如果当前行已在歌词运行中高亮且已滚动到相应位置，忽略
+    // 用当前高亮行的下标判断是否需要更新
+    static int s_lastHighlighted = -1;
+
+    if (idx == s_lastHighlighted)
+        return;
+
+    // 还原上一行颜色
+    if (s_lastHighlighted >= 0 && s_lastHighlighted < m_lyricsWidget->count()) {
+        auto *prevItem = m_lyricsWidget->item(s_lastHighlighted);
+        prevItem->setForeground(QColor("#888"));
+        QFont f = prevItem->font();
+        f.setBold(false);
+        f.setPointSize(12);
+        prevItem->setFont(f);
+    }
+
+    // 高亮当前行
+    auto *currItem = m_lyricsWidget->item(idx);
+    currItem->setForeground(QColor("#e94560"));
+    QFont f = currItem->font();
+    f.setBold(true);
+    f.setPointSize(15);
+    currItem->setFont(f);
+
+    // 只有在跟随模式下才自动滚动
+    if (m_lyricsFollowing) {
+        m_lyricsSuppressScroll = true;
+        m_lyricsWidget->scrollToItem(currItem, QAbstractItemView::PositionAtCenter);
+        m_lyricsSuppressScroll = false;
+    }
+
+    s_lastHighlighted = idx;
+}
+
+// ════════════════════════════════════════════════════════════
+//  歌词滚动交互
+// ════════════════════════════════════════════════════════════
+
+bool MainWindow::eventFilter(QObject *obj, QEvent *event)
+{
+    if (obj == m_lyricsWidget->viewport()) {
+        switch (event->type()) {
+        case QEvent::Wheel: {
+            auto *we = static_cast<QWheelEvent *>(event);
+            m_lyricsWheelPos = we->position().toPoint();
+            break;
+        }
+        case QEvent::MouseMove: {
+            // 非跟随模式下，持续检测鼠标悬浮行并移动按钮
+            if (!m_lyricsFollowing && m_lyricsPlayBtn->isVisible()) {
+                auto *me = static_cast<QMouseEvent *>(event);
+                moveLyricsButtonTo(me->position().toPoint());
+                m_lyricsRevertTimer->start();  // 每次移动都重置回弹倒计时
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
+}
+
+void MainWindow::moveLyricsButtonTo(const QPoint &viewportPos)
+{
+    if (!m_subtitle->isLoaded() || m_lyricsWidget->count() == 0)
+        return;
+
+    // 找到鼠标悬浮处的歌词行
+    QListWidgetItem *hoverItem = m_lyricsWidget->itemAt(viewportPos);
+    if (!hoverItem) {
+        const int firstVisible = m_lyricsWidget->indexAt(QPoint(0, 0)).row();
+        if (firstVisible >= 0 && firstVisible < m_lyricsWidget->count())
+            hoverItem = m_lyricsWidget->item(firstVisible);
+    }
+    if (!hoverItem)
+        return;
+
+    // 定位按钮到该行右侧
+    const QRect vpRect = m_lyricsWidget->viewport()->rect();
+    const QRect itemRect = m_lyricsWidget->visualItemRect(hoverItem);
+    const int btnX = vpRect.right() - m_lyricsPlayBtn->width() - 8;
+    const int btnY = itemRect.center().y() - m_lyricsPlayBtn->height() / 2;
+    m_lyricsPlayBtn->move(btnX, btnY);
+    m_lyricsPlayBtn->show();
+    m_lyricsPlayBtn->raise();
+}
+
+void MainWindow::onLyricsScrolled(const QPoint &viewportPos)
+{
+    if (!m_subtitle->isLoaded() || m_lyricsWidget->count() == 0)
+        return;
+
+    m_lyricsFollowing = false;
+
+    // 确定鼠标悬浮位置：优先使用传入的 viewportPos，否则从全局鼠标位置获取
+    QPoint pos = viewportPos;
+    if (pos.isNull())
+        pos = m_lyricsWidget->viewport()->mapFromGlobal(QCursor::pos());
+
+    moveLyricsButtonTo(pos);
+
+    // 重置回弹定时器
+    m_lyricsRevertTimer->start();
+}
+
+void MainWindow::onLyricsPlayClicked()
+{
+    if (!m_subtitle->isLoaded() || m_lyricsWidget->count() == 0)
+        return;
+
+    // 取按钮当前所在行（按钮中心点对应的歌词行）
+    const QPoint btnCenter(m_lyricsPlayBtn->x() + m_lyricsPlayBtn->width() / 2,
+                           m_lyricsPlayBtn->y() + m_lyricsPlayBtn->height() / 2);
+    QListWidgetItem *targetItem = m_lyricsWidget->itemAt(btnCenter);
+    if (!targetItem) {
+        // 按钮通常位于某行右侧，若 itemAt 没命中，用按钮左边缘再试
+        const QPoint btnLeft(m_lyricsPlayBtn->x() - 4, btnCenter.y());
+        targetItem = m_lyricsWidget->itemAt(btnLeft);
+    }
+    if (!targetItem)
+        return;
+
+    // 用按钮上方的 item（按钮可能位于两行之间时取上面的）
+    const int row = m_lyricsWidget->row(targetItem);
+    const qint64 targetMs = m_subtitle->lineAt(row).startMs;
+
+    // 跳转播放
+    m_player->seek(targetMs);
+    if (m_player->playbackState() != Player::PlaybackState::Playing)
+        m_player->play();
+
+    // 恢复跟随状态
+    m_lyricsFollowing = true;
+    m_lyricsPlayBtn->hide();
+    m_lyricsRevertTimer->stop();
+
+    // 立即刷新高亮
+    updateLyrics(m_player->position());
+}
+
+void MainWindow::updateLyricsOffsetLabel()
+{
+    const qint64 offsetMs = m_subtitle->userOffset();
+    const double sec = offsetMs / 1000.0;
+    m_lyricsOffsetLabel->setText((sec >= 0 ? QStringLiteral("+") : QString())
+                                 + QString::number(sec, 'f', 1) + QStringLiteral("s"));
+}
+
+void MainWindow::onLyricsOffsetAdjust(qint64 deltaMs)
+{
+    if (!m_subtitle->isLoaded())
+        return;
+
+    m_subtitle->adjustUserOffset(deltaMs);
+    updateLyricsOffsetLabel();
+
+    // 立即根据新偏移刷新当前高亮
+    if (m_player->playbackState() != Player::PlaybackState::Stopped)
+        updateLyrics(m_player->position());
+
+    // 实时保存偏移
+    if (m_playlist->hasCurrent())
+        m_library->saveLyricsOffset(m_playlist->currentSong().filePath, m_subtitle->userOffset());
+
+    statusBar()->showMessage(
+        QStringLiteral("歌词偏移: %1").arg(m_lyricsOffsetLabel->text()), 2000);
+}
+
+void MainWindow::onLyricsRevertTimeout()
+{
+    m_lyricsPlayBtn->hide();
+    m_lyricsFollowing = true;
+
+    // 滚回当前高亮行
+    if (m_subtitle->isLoaded() && m_lyricsWidget->count() > 0) {
+        // 用 s_lastHighlighted 的方式需要获取，但它是 static 局部变量
+        // 改为从 m_subtitle 获取当前播放位置对应行
+        if (m_player->playbackState() != Player::PlaybackState::Stopped) {
+            const int curIdx = m_subtitle->lineIndexAt(m_player->position());
+            if (curIdx >= 0 && curIdx < m_lyricsWidget->count()) {
+                m_lyricsSuppressScroll = true;
+                m_lyricsWidget->scrollToItem(m_lyricsWidget->item(curIdx),
+                                             QAbstractItemView::PositionAtCenter);
+                m_lyricsSuppressScroll = false;
+            }
+        }
     }
 }
