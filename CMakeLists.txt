@@ -20,13 +20,21 @@ set(SOURCES
     src/main.cpp
     src/mainwindow.cpp
     src/player.cpp
+    src/playlist.cpp
+    src/playtrack.cpp
+    src/song.cpp
     src/subtitleplayer.cpp
+    src/library.cpp
 )
 
 set(HEADERS
     src/mainwindow.h
     src/player.h
+    src/playlist.h
+    src/playtrack.h
+    src/song.h
     src/subtitleplayer.h
+    src/library.h
 )
 
 # ── Executable ──
