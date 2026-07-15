@@ -3,8 +3,10 @@
 
 #include <QObject>
 #include <QUrl>
+#include <QPixmap>
 #include <QMediaPlayer>
 #include <QAudioOutput>
+#include <QMediaMetaData>
 
 /// Player - 对 Qt Multimedia (QMediaPlayer + QAudioOutput) 的简化封装
 ///
@@ -50,7 +52,13 @@ public:
 
     // ── 状态查询 ──
     PlaybackState playbackState() const;
+    bool isPlaying() const;
     QString errorString() const;
+
+    // ── 元数据查询 ──
+    QString currentArtist() const;
+    QString currentTitle() const;
+    QPixmap currentCoverArt() const;
 
 signals:
     void sourceChanged(const QUrl &url);
@@ -61,15 +69,23 @@ signals:
     void mutedChanged(bool muted);
     void errorOccurred(const QString &errorString);
 
+    /// 元数据变更（艺术家、封面等就绪时发射）
+    void metaDataChanged();
+    void artistChanged(const QString &artist);
+    void coverArtChanged(const QPixmap &cover);
+
 private slots:
     void onMediaError(QMediaPlayer::Error error);
     void onPlaybackStateChanged(QMediaPlayer::PlaybackState state);
     void onPositionChanged(qint64 positionMs);
     void onDurationChanged(qint64 durationMs);
+    void onMediaStatusChanged(QMediaPlayer::MediaStatus status);
+    void onMetaDataChanged();
 
 private:
     QMediaPlayer  *m_mediaPlayer  = nullptr;
     QAudioOutput  *m_audioOutput  = nullptr;
+    QPixmap        m_cachedCover;
 };
 
 #endif // PLAYER_H

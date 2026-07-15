@@ -54,6 +54,8 @@ private:
     void onFolderLoaded(const QList<Song> &songs);
     void onPlaylistCurrentChanged(int index);
     void restorePlaylistFromLibrary();
+    /// 拖拽排序后从 QListWidget 顺序重建 Playlist
+    void syncPlaylistFromUI();
 
     // ── 歌词 ──
     void updateLyrics(qint64 positionMs);
@@ -94,6 +96,7 @@ private:
 
     // ── 状态追踪 ──
     bool m_userDragging = false;        // 用户正在拖拽进度条
+    bool m_manualTrackChange = false;   // 手动切歌中，防止 Stopped 额外触发 next
     qint64 m_storedPosition = 0;        // 拖拽时保存的真实位置
 };
 

@@ -151,10 +151,11 @@ QList<Song> PlayTrack::scanFolder(const QString &dirPath)
         result.append(song);
     }
 
-    // 按标题排序，保证每次加载顺序一致
+    // 按原始文件名排序（保留文件自身编号顺序）
     std::sort(result.begin(), result.end(),
               [](const Song &a, const Song &b) {
-                  return a.title.toLower() < b.title.toLower();
+                  return QFileInfo(a.filePath).completeBaseName().toLower()
+                       < QFileInfo(b.filePath).completeBaseName().toLower();
               });
 
     return result;

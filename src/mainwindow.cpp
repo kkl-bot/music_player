@@ -230,11 +230,11 @@ void MainWindow::setupCentralWidget()
     QHBoxLayout *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
 
-    m_btnShuffle = new QPushButton(QStringLiteral("🔀"), this);
+    m_btnShuffle = new QPushButton(QStringLiteral("随机"), this);
     m_btnShuffle->setObjectName(QStringLiteral("ctrlBtn"));
     m_btnShuffle->setToolTip(QStringLiteral("随机播放"));
     m_btnShuffle->setCheckable(true);
-    m_btnShuffle->setFixedSize(36, 36);
+    m_btnShuffle->setFixedSize(48, 36);
     btnRow->addWidget(m_btnShuffle);
 
     btnRow->addStretch();
@@ -259,10 +259,10 @@ void MainWindow::setupCentralWidget()
 
     btnRow->addStretch();
 
-    m_btnRepeat = new QPushButton(QStringLiteral("🔁"), this);
+    m_btnRepeat = new QPushButton(QStringLiteral("循环"), this);
     m_btnRepeat->setObjectName(QStringLiteral("ctrlBtn"));
     m_btnRepeat->setToolTip(QStringLiteral("循环模式"));
-    m_btnRepeat->setFixedSize(36, 36);
+    m_btnRepeat->setFixedSize(48, 36);
     btnRow->addWidget(m_btnRepeat);
 
     // 音量
@@ -397,6 +397,10 @@ void MainWindow::connectSignals()
     connect(m_listWidget, &QListWidget::currentRowChanged,
             this, &MainWindow::onSongSelected);
 
+    // 拖拽排序后同步 Playlist
+    connect(m_listWidget->model(), &QAbstractItemModel::rowsMoved,
+            this, &MainWindow::syncPlaylistFromUI);
+
     // Playlist 当前改变 → 同步高亮
     connect(m_playlist, &Playlist::currentIndexChanged,
             this, &MainWindow::onPlaylistCurrentChanged);
@@ -436,6 +440,17 @@ void MainWindow::connectSignals()
     connect(m_player, &Player::errorOccurred, this, [this](const QString &msg) {
         statusBar()->showMessage(QStringLiteral("错误: ") + msg, 5000);
     });
+
+    // ── 元数据信号 ──
+    connect(m_player, &Player::artistChanged, this, [this](const QString &artist) {
+        m_songArtist->setText(artist.isEmpty()
+            ? QStringLiteral("未知艺术家") : artist);
+    });
+    connect(m_player, &Player::coverArtChanged, this, [this](const QPixmap &cover) {
+        if (!cover.isNull())
+            m_albumArt->setPixmap(cover.scaled(
+                180, 180, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    });
 }
 
 // ════════════════════════════════════════════════════════════
@@ -463,6 +478,7 @@ void MainWindow::onNext()
         statusBar()->showMessage(QStringLiteral("已是最后一首"), 2000);
         return;
     }
+    m_manualTrackChange = true;
     const Song song = m_playlist->next();
     if (song.isValid()) {
         m_player->setSource(song.url());
@@ -476,6 +492,7 @@ void MainWindow::onPrevious()
         statusBar()->showMessage(QStringLiteral("已是第一首"), 2000);
         return;
     }
+    m_manualTrackChange = true;
     const Song song = m_playlist->previous();
     if (song.isValid()) {
         m_player->setSource(song.url());
@@ -488,13 +505,24 @@ void MainWindow::onSongSelected(int index)
     if (index < 0 || index >= m_playlist->count())
         return;
 
+    m_manualTrackChange = true;
     m_playlist->setCurrentIndex(index);
     const Song &song = m_playlist->currentSong();
     if (!song.isValid()) return;
 
     m_songTitle->setText(song.displayTitle());
-    m_songArtist->setText(song.artist.isEmpty()
-        ? QStringLiteral("未知艺术家") : song.artist);
+    m_songArtist->setText(song.displayArtist());
+
+    // 优先加载本地封面文件（文件夹中的 cover.jpg 等）
+    if (song.hasCoverFile()) {
+        QPixmap cover = song.loadCoverFile();
+        if (!cover.isNull())
+            m_albumArt->setPixmap(cover);
+        else
+            m_albumArt->setText(QStringLiteral("🎵"));
+    } else {
+        m_albumArt->setText(QStringLiteral("🎵"));
+    }
 
     m_subtitle->clear();
     if (song.hasLyrics()) {
@@ -526,6 +554,13 @@ void MainWindow::onPlayerStateChanged(Player::PlaybackState state)
     case Player::PlaybackState::Stopped:
         m_btnPlayPause->setText(QStringLiteral("▶"));
         m_btnPlayPause->setToolTip(QStringLiteral("播放"));
+        // 手动切歌（下一首/上一首/双击列表）时，Stopped 由 setSource 触发，
+        // 此时不应自动跳到下一首，否则会跳两首
+        if (m_manualTrackChange) {
+            m_manualTrackChange = false;
+            break;
+        }
+        // 自然结束 → 自动下一首
         if (m_playlist->hasNext()) {
             const Song nextSong = m_playlist->next();
             if (nextSong.isValid()) {
@@ -603,7 +638,7 @@ void MainWindow::onToggleRepeat()
     case RM::One:  mode = RM::None; break;
     }
     m_playlist->setRepeatMode(mode);
-    m_btnRepeat->setText(mode == RM::One ? QStringLiteral("🔂") : QStringLiteral("🔁"));
+    m_btnRepeat->setText(mode == RM::One ? QStringLiteral("单曲") : QStringLiteral("循环"));
     statusBar()->showMessage(
         mode == RM::None ? QStringLiteral("循环: 关闭") :
         mode == RM::All  ? QStringLiteral("循环: 列表循环") :
@@ -623,8 +658,11 @@ void MainWindow::onFolderLoaded(const QList<Song> &songs)
 {
     m_playlist->setSongs(songs);
     m_listWidget->clear();
-    for (const auto &song : songs)
-        m_listWidget->addItem(song.displayTitle());
+    for (const auto &song : songs) {
+        auto *item = new QListWidgetItem(song.displayTitle());
+        item->setData(Qt::UserRole, song.filePath);      // ← 存入路径
+        m_listWidget->addItem(item);
+    }
 
     m_listCountLabel->setText(QStringLiteral("共 %1 首").arg(songs.size()));
     statusBar()->showMessage(QStringLiteral("已加载 %1 首歌曲").arg(songs.size()), 3000);
@@ -645,8 +683,7 @@ void MainWindow::onPlaylistCurrentChanged(int index)
     if (m_playlist->hasCurrent()) {
         const Song &song = m_playlist->currentSong();
         m_songTitle->setText(song.displayTitle());
-        m_songArtist->setText(song.artist.isEmpty()
-            ? QStringLiteral("未知艺术家") : song.artist);
+        m_songArtist->setText(song.displayArtist());
     }
 }
 
@@ -656,7 +693,7 @@ void MainWindow::restorePlaylistFromLibrary()
     m_playlist->setRepeatMode(static_cast<Playlist::RepeatMode>(repeatMode));
     m_playlist->setShuffle(m_library->loadShuffle());
     m_btnShuffle->setChecked(m_playlist->isShuffle());
-    if (repeatMode == 1) m_btnRepeat->setText(QStringLiteral("🔂"));
+    if (repeatMode == 1) m_btnRepeat->setText(QStringLiteral("单曲"));
 
     int savedIndex = -1;
     QList<Song> savedSongs = m_library->loadPlaylist(savedIndex);
@@ -664,12 +701,61 @@ void MainWindow::restorePlaylistFromLibrary()
         m_playlist->setSongs(savedSongs);
         m_playlist->setCurrentIndex(savedIndex);
         m_listWidget->clear();
-        for (const auto &song : savedSongs)
-            m_listWidget->addItem(song.displayTitle());
+        for (const auto &song : savedSongs) {
+            auto *item = new QListWidgetItem(song.displayTitle());
+            item->setData(Qt::UserRole, song.filePath);  // ← 存入路径
+            m_listWidget->addItem(item);
+        }
         m_listCountLabel->setText(QStringLiteral("共 %1 首").arg(savedSongs.size()));
         statusBar()->showMessage(
             QStringLiteral("已恢复上次会话 %1 首歌曲").arg(savedSongs.size()), 3000);
     }
+}
+
+/// 拖拽排序后，将 QListWidget 中的显示顺序同步回 Playlist
+void MainWindow::syncPlaylistFromUI()
+{
+    // 从 QListWidget item 中读取歌曲路径
+    QStringList orderedPaths;
+    for (int i = 0; i < m_listWidget->count(); ++i) {
+        const QString path = m_listWidget->item(i)->data(Qt::UserRole).toString();
+        if (!path.isEmpty())
+            orderedPaths.append(path);
+    }
+
+    // 按新顺序重建 Song 列表（用路径快速查找保留原 metadata）
+    QMap<QString, Song> pathMap;
+    for (const auto &s : m_playlist->allSongs())
+        pathMap.insert(s.filePath, s);
+
+    QList<Song> reordered;
+    for (const auto &path : orderedPaths) {
+        if (pathMap.contains(path))
+            reordered.append(pathMap.value(path));
+    }
+
+    // 找出当前播放歌曲在新列表中的索引
+    const QString currentPath = m_playlist->hasCurrent()
+        ? m_playlist->currentSong().filePath : QString();
+
+    int newIndex = 0;
+    for (int i = 0; i < reordered.size(); ++i) {
+        if (reordered[i].filePath == currentPath) {
+            newIndex = i;
+            break;
+        }
+    }
+
+    // block 信号，一次性更新列表和索引
+    m_playlist->blockSignals(true);
+    m_playlist->setSongs(reordered);
+    m_playlist->setCurrentIndex(newIndex);
+    m_playlist->blockSignals(false);
+
+    emit m_playlist->songsChanged();
+    emit m_playlist->currentIndexChanged(newIndex);
+
+    statusBar()->showMessage(QStringLiteral("播放顺序已更新"), 2000);
 }
 
 // ════════════════════════════════════════════════════════════

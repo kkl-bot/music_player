@@ -21,6 +21,10 @@ Player::Player(QObject *parent)
             this, &Player::onPositionChanged);
     connect(m_mediaPlayer, &QMediaPlayer::durationChanged,
             this, &Player::onDurationChanged);
+    connect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged,
+            this, &Player::onMediaStatusChanged);
+    connect(m_mediaPlayer, &QMediaPlayer::metaDataChanged,
+            this, &Player::onMetaDataChanged);
 }
 
 Player::~Player() = default;
@@ -34,12 +38,13 @@ void Player::setSource(const QUrl &url)
     if (url == m_mediaPlayer->source())
         return;
 
+    m_cachedCover = QPixmap();   // 清空旧封面
+
+    // 重置进度显示
+    emit positionChanged(0);
+    emit durationChanged(0);
+
     m_mediaPlayer->setSource(url);
-
-    // 设置新源后自动加载
-    if (!url.isEmpty())
-        m_mediaPlayer->play();
-
     emit sourceChanged(url);
 }
 
@@ -59,6 +64,9 @@ QUrl Player::source() const
 
 void Player::play()
 {
+    if (m_mediaPlayer->source().isEmpty())
+        return;
+
     m_mediaPlayer->play();
 }
 
@@ -109,14 +117,15 @@ qint64 Player::duration() const
 
 void Player::setVolume(int percent)
 {
-    const qreal volume = qBound(0.0, percent / 100.0, 1.0);
+    const int clamped = qBound(0, percent, 100);
+    const qreal volume = static_cast<qreal>(clamped) / 100.0;
     m_audioOutput->setVolume(volume);
-    emit volumeChanged(percent);
+    emit volumeChanged(clamped);
 }
 
 int Player::volume() const
 {
-    return static_cast<int>(m_audioOutput->volume() * 100);
+    return qRound(m_audioOutput->volume() * 100.0);
 }
 
 void Player::setMuted(bool muted)
@@ -128,6 +137,11 @@ void Player::setMuted(bool muted)
 bool Player::isMuted() const
 {
     return m_audioOutput->isMuted();
+}
+
+bool Player::isPlaying() const
+{
+    return m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -142,6 +156,28 @@ Player::PlaybackState Player::playbackState() const
 QString Player::errorString() const
 {
     return m_mediaPlayer->errorString();
+}
+
+// ════════════════════════════════════════════════════════════
+//  元数据查询
+// ════════════════════════════════════════════════════════════
+
+QString Player::currentArtist() const
+{
+    const QString artist = m_mediaPlayer->metaData().value(QMediaMetaData::Author).toString();
+    if (artist.isEmpty())
+        return m_mediaPlayer->metaData().value(QMediaMetaData::AlbumArtist).toString();
+    return artist;
+}
+
+QString Player::currentTitle() const
+{
+    return m_mediaPlayer->metaData().value(QMediaMetaData::Title).toString();
+}
+
+QPixmap Player::currentCoverArt() const
+{
+    return m_cachedCover;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -167,4 +203,35 @@ void Player::onPositionChanged(qint64 positionMs)
 void Player::onDurationChanged(qint64 durationMs)
 {
     emit durationChanged(durationMs);
+}
+
+void Player::onMediaStatusChanged(QMediaPlayer::MediaStatus status)
+{
+    switch (status) {
+    case QMediaPlayer::LoadedMedia:
+        emit durationChanged(m_mediaPlayer->duration());
+        break;
+    case QMediaPlayer::InvalidMedia:
+        emit errorOccurred(QStringLiteral("无法加载媒体文件: ") + m_mediaPlayer->source().toString());
+        break;
+    default:
+        break;
+    }
+}
+
+void Player::onMetaDataChanged()
+{
+    // 读取内嵌封面
+    const QVariant coverVariant = m_mediaPlayer->metaData().value(QMediaMetaData::CoverArtImage);
+    if (coverVariant.isValid()) {
+        m_cachedCover = coverVariant.value<QPixmap>();
+        emit coverArtChanged(m_cachedCover);
+    }
+
+    // 读取艺术家
+    const QString artist = currentArtist();
+    if (!artist.isEmpty())
+        emit artistChanged(artist);
+
+    emit metaDataChanged();
 }

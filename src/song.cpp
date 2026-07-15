@@ -1,6 +1,7 @@
 #include "song.h"
 #include <QFileInfo>
 #include <QDir>
+#include <QPixmap>
 
 // ════════════════════════════════════════════════════════════
 //  构造
@@ -14,6 +15,7 @@ Song::Song(const QString &filePath)
     artist  = {};
     album   = {};
     lyricsPath = detectLyricsFile(filePath);
+    coverPath  = detectCoverFile(filePath);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -30,6 +32,22 @@ bool Song::hasLyrics() const
     return !lyricsPath.isEmpty() && QFileInfo::exists(lyricsPath);
 }
 
+bool Song::hasCoverFile() const
+{
+    return !coverPath.isEmpty() && QFileInfo::exists(coverPath);
+}
+
+QPixmap Song::loadCoverFile() const
+{
+    if (!hasCoverFile())
+        return {};
+    QPixmap pix(coverPath);
+    // 限制最大尺寸防止内存占用过大
+    if (pix.width() > 512 || pix.height() > 512)
+        pix = pix.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    return pix;
+}
+
 QString Song::displayTitle() const
 {
     if (!title.isEmpty())
@@ -37,6 +55,11 @@ QString Song::displayTitle() const
     if (!filePath.isEmpty())
         return QFileInfo(filePath).completeBaseName();
     return QStringLiteral("未知曲目");
+}
+
+QString Song::displayArtist() const
+{
+    return artist.isEmpty() ? QStringLiteral("未知艺术家") : artist;
 }
 
 QString Song::durationString() const
@@ -62,7 +85,7 @@ bool Song::isValid() const
 QString Song::toString() const
 {
     return QStringLiteral("Song(%1 | %2 | %3)")
-        .arg(displayTitle(), artist, durationString());
+        .arg(displayTitle(), displayArtist(), durationString());
 }
 
 Song Song::fromFileInfo(const QFileInfo &fi)
@@ -80,10 +103,44 @@ QString Song::detectLyricsFile(const QString &audioPath)
     const QDir dir = fi.absoluteDir();
     const QString baseName = fi.completeBaseName();
 
-    // 优先尝试同名的 .lrc
     static const QStringList kLyricExtensions { "lrc", "txt", "srt" };
     for (const auto &ext : kLyricExtensions) {
         const QString candidate = dir.absoluteFilePath(baseName + '.' + ext);
+        if (QFileInfo::exists(candidate))
+            return candidate;
+    }
+
+    return {};
+}
+
+// ════════════════════════════════════════════════════════════
+//  内部 — 自动探测封面图片
+// ════════════════════════════════════════════════════════════
+
+QString Song::detectCoverFile(const QString &audioPath)
+{
+    const QFileInfo fi(audioPath);
+    const QDir dir = fi.absoluteDir();
+    const QString baseName = fi.completeBaseName();
+
+    // 常见封面文件名（优先同名，再试通用名）
+    static const QStringList kCoverCandidates = {
+        // 同名图片
+        baseName + ".jpg",  baseName + ".png",
+        baseName + ".jpeg", baseName + ".webp",
+        baseName + ".bmp",
+        // 通用封面名
+        "cover.jpg",   "cover.png",
+        "Cover.jpg",   "Cover.png",
+        "folder.jpg",  "folder.png",
+        "Folder.jpg",  "Folder.png",
+        "album.jpg",   "album.png",
+        "Album.jpg",   "Album.png",
+        "front.jpg",   "front.png",
+    };
+
+    for (const auto &name : kCoverCandidates) {
+        const QString candidate = dir.absoluteFilePath(name);
         if (QFileInfo::exists(candidate))
             return candidate;
     }
