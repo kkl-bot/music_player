@@ -5,6 +5,8 @@
 #include "lyricsdecoder.h"
 #include "library.h"
 #include "song.h"
+#include "style.h"
+#include "conversiondialog.h"
 
 #include <QApplication>
 #include <QMenuBar>
@@ -21,6 +23,7 @@
 #include <QScrollBar>
 #include <QAbstractItemView>
 #include <QCursor>
+#include <QFileInfo>
 
 // ════════════════════════════════════════════════════════════
 //  构造 / 析构
@@ -187,6 +190,14 @@ void MainWindow::setupCentralWidget()
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
+
+    // 搜索框
+    m_searchBox = new QLineEdit(this);
+    m_searchBox->setObjectName(QStringLiteral("searchBox"));
+    m_searchBox->setPlaceholderText(QStringLiteral("搜索歌曲..."));
+    m_searchBox->setClearButtonEnabled(true);
+    m_searchBox->setFixedHeight(40);
+    leftLayout->addWidget(m_searchBox);
 
     m_listWidget = new QListWidget(this);
     m_listWidget->setAlternatingRowColors(true);
@@ -382,113 +393,7 @@ void MainWindow::setupCentralWidget()
 
 void MainWindow::setupStyleSheet()
 {
-    setStyleSheet(QStringLiteral(R"(
-        QMainWindow { background-color: #1a1a2e; }
-        QWidget { color: #e0e0e0; font-family: "Segoe UI","Microsoft YaHei",sans-serif; }
-
-        QMenuBar {
-            background-color: #16213e; color: #ccc;
-            border-bottom: 1px solid #0f3460; padding: 2px 0;
-        }
-        QMenuBar::item:selected { background-color: #0f3460; color: #fff; }
-        QMenu { background-color: #16213e; border: 1px solid #0f3460; }
-        QMenu::item:selected { background-color: #0f3460; }
-
-        QListWidget {
-            background-color: #16213e; border: none;
-            border-right: 1px solid #0f3460; font-size: 13px; outline: none;
-        }
-        QListWidget::item {
-            padding: 6px 12px; border-bottom: 1px solid #1a2744;
-        }
-        QListWidget::item:selected { background-color: #0f3460; color: #fff; }
-        QListWidget::item:hover:!selected { background-color: #1a2744; }
-        QListWidget::item:alternate { background-color: #192841; }
-
-        #countLabel {
-            background-color: #16213e; padding: 4px 12px;
-            font-size: 12px; color: #888; border-top: 1px solid #0f3460;
-        }
-
-        #songTitle { font-size: 20px; font-weight: bold; color: #fff; }
-        #songArtist { font-size: 14px; color: #aaa; }
-
-        #lyricsWidget {
-            font-size: 15px; color: #888; background: transparent;
-            border: none; padding: 4px 0;
-        }
-        #lyricsWidget::item {
-            padding: 6px 16px; border: none;
-        }
-        #lyricsWidget::item:selected {
-            background: transparent; color: #e94560;
-        }
-        #albumArt { font-size: 64px; background-color: #16213e; border-radius: 12px; }
-
-        #lyricsPlayBtn {
-            background-color: #e94560; color: #fff; font-size: 14px;
-            border: none; border-radius: 18px;
-        }
-        #lyricsPlayBtn:hover { background-color: #ff6b81; }
-
-        #lyricsOffsetBtn {
-            background-color: #0f3460; color: #ccc; font-size: 14px; font-weight: bold;
-            border: 1px solid #1a5276; border-radius: 12px;
-        }
-        #lyricsOffsetBtn:hover { background-color: #1a5276; color: #fff; }
-        #lyricsOffsetLabel {
-            font-size: 12px; color: #aaa; min-width: 40px;
-        }
-
-        #controlBar { background-color: #0f3460; border-top: 1px solid #1a5276; }
-
-        #progressSlider::groove:horizontal { height: 5px; background: #1a2744; border-radius: 2px; }
-        #progressSlider::handle:horizontal {
-            width: 14px; height: 14px; margin: -5px 0;
-            background: #e94560; border-radius: 7px;
-        }
-        #progressSlider::sub-page:horizontal { background: #e94560; border-radius: 2px; }
-        #progressSlider { background: transparent; }
-
-        #volumeSlider::groove:horizontal { height: 4px; background: #1a2744; border-radius: 2px; }
-        #volumeSlider::handle:horizontal {
-            width: 12px; height: 12px; margin: -4px 0;
-            background: #ccc; border-radius: 6px;
-        }
-        #volumeSlider::sub-page:horizontal { background: #e94560; border-radius: 2px; }
-        #volumeSlider { background: transparent; }
-
-        #timeLabel { font-size: 12px; color: #aaa; min-width: 36px; }
-
-        #ctrlBtn {
-            background: transparent; border: none;
-            font-size: 18px; color: #ccc; border-radius: 18px;
-        }
-        #ctrlBtn:hover { background: rgba(233,69,96,0.2); color: #fff; }
-        #ctrlBtn:checked { color: #e94560; }
-
-        #playBtn {
-            background: #e94560; border: none; font-size: 20px;
-            color: #fff; border-radius: 22px;
-        }
-        #playBtn:hover { background: #ff6b81; }
-
-        #volumeLabel { font-size: 12px; color: #aaa; }
-
-        QStatusBar {
-            background-color: #16213e; color: #888;
-            border-top: 1px solid #0f3460; font-size: 12px;
-        }
-        QSplitter::handle { background: #0f3460; }
-
-        QScrollBar:vertical {
-            width: 8px; background: #16213e;
-        }
-        QScrollBar::handle:vertical {
-            background: #0f3460; border-radius: 4px; min-height: 30px;
-        }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-    )"));
+    setStyleSheet(Style::styleSheet());
 }
 
 // ════════════════════════════════════════════════════════════
@@ -517,6 +422,15 @@ void MainWindow::connectSignals()
     connect(m_playlist, &Playlist::currentIndexChanged,
             this, &MainWindow::onPlaylistCurrentChanged);
 
+    // 搜索过滤
+    connect(m_searchBox, &QLineEdit::textChanged,
+            this, &MainWindow::onSearchTextChanged);
+
+    // ── 右键菜单（格式转换） ──
+    m_listWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_listWidget, &QWidget::customContextMenuRequested,
+            this, &MainWindow::onShowConversionMenu);
+
     // 控制按钮
     connect(m_btnPlayPause, &QPushButton::clicked, this, &MainWindow::onPlayPause);
     connect(m_btnPrev,      &QPushButton::clicked, this, &MainWindow::onPrevious);
@@ -535,10 +449,13 @@ void MainWindow::connectSignals()
     });
     connect(m_progressSlider, &QSlider::valueChanged, this, [this](int value) {
         if (m_userDragging) {
-            const int secs = value / 1000;
-            m_timeCurrent->setText(QStringLiteral("%1:%2")
-                .arg(secs / 60, 2, 10, QLatin1Char('0'))
-                .arg(secs % 60, 2, 10, QLatin1Char('0')));
+            const int curSecs = value / 1000;
+            const int totalSecs = m_progressSlider->maximum() / 1000;
+            m_timeCurrent->setText(QStringLiteral("%1:%2 / %3:%4")
+                .arg(curSecs / 60, 2, 10, QLatin1Char('0'))
+                .arg(curSecs % 60, 2, 10, QLatin1Char('0'))
+                .arg(totalSecs / 60, 2, 10, QLatin1Char('0'))
+                .arg(totalSecs % 60, 2, 10, QLatin1Char('0')));
         }
     });
 
@@ -749,9 +666,6 @@ void MainWindow::updateDurationUI(qint64 durationMs)
 
 void MainWindow::onVolumeChanged(int percent)
 {
-    m_player->setVolume(percent);
-    m_volumeLabel->setText(QString::number(percent));
-
     if (percent == 0) {
         m_btnMute->setText(QStringLiteral("🔇"));
         m_btnMute->setChecked(true);
@@ -762,6 +676,9 @@ void MainWindow::onVolumeChanged(int percent)
         m_btnMute->setText(QStringLiteral("🔊"));
         m_btnMute->setChecked(false);
     }
+    m_player->setVolume(percent);
+    m_volumeLabel->setText(QString::number(percent));
+    m_player->isMuted() ? m_player->setMuted(false) : void();
 }
 
 void MainWindow::onToggleMute()
@@ -941,6 +858,42 @@ void MainWindow::syncPlaylistFromUI()
     emit m_playlist->currentIndexChanged(newIndex);
 
     statusBar()->showMessage(QStringLiteral("播放顺序已更新"), 2000);
+}
+
+// ════════════════════════════════════════════════════════════
+//  搜索过滤
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::onSearchTextChanged(const QString &text)
+{
+    const QList<int> matchIndices = m_playlist->searchIndices(text);
+
+    // 遍历所有 item，匹配的显示，不匹配的隐藏
+    const int total = m_listWidget->count();
+    int visibleCount = 0;
+    for (int i = 0; i < total; ++i) {
+        const bool visible = text.isEmpty() || matchIndices.contains(i);
+        m_listWidget->item(i)->setHidden(!visible);
+        if (visible) visibleCount++;
+    }
+
+    // 搜索激活时禁用拖拽排序，避免混乱
+    m_listWidget->setDragDropMode(text.isEmpty()
+        ? QAbstractItemView::InternalMove
+        : QAbstractItemView::NoDragDrop);
+
+    // 若当前播放歌曲被隐藏（搜索不匹配），清除高亮
+    if (m_playlist->hasCurrent()) {
+        const int curIdx = m_playlist->currentIndex();
+        if (!text.isEmpty() && !matchIndices.contains(curIdx)) {
+            if (m_listWidget->currentRow() >= 0)
+                m_listWidget->setCurrentRow(-1);
+        }
+    }
+
+    m_listCountLabel->setText(text.isEmpty()
+        ? QStringLiteral("共 %1 首").arg(total)
+        : QStringLiteral("找到 %1 / %2 首").arg(visibleCount).arg(total));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1145,4 +1098,40 @@ void MainWindow::onLyricsRevertTimeout()
             }
         }
     }
+}
+
+// ════════════════════════════════════════════════════════════
+//  格式转换（右键菜单）
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::onShowConversionMenu(const QPoint &pos)
+{
+    QListWidgetItem *item = m_listWidget->itemAt(pos);
+    if (!item)
+        return;
+
+    const QString filePath = item->data(Qt::UserRole).toString();
+    if (filePath.isEmpty() || !QFileInfo::exists(filePath))
+        return;
+
+    const QString title = item->text();
+
+    QMenu menu(this);
+    menu.setTitle(QStringLiteral("操作"));
+
+    QAction *actConvert = menu.addAction(QStringLiteral("格式转换"));
+    actConvert->setIcon(qApp->style()->standardIcon(QStyle::SP_FileDialogDetailedView));
+
+    QAction *selected = menu.exec(m_listWidget->viewport()->mapToGlobal(pos));
+    if (selected == actConvert) {
+        onConvertSong(filePath, title);
+    }
+}
+
+void MainWindow::onConvertSong(const QString &filePath, const QString &title)
+{
+    // 对话框采用模态方式，内部异步转码不阻塞播放器
+    ConversionDialog dlg(filePath, title, this);
+    dlg.setModal(true);
+    dlg.exec();
 }

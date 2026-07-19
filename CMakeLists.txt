@@ -25,6 +25,9 @@ set(SOURCES
     src/song.cpp
     src/lyricsdecoder.cpp
     src/library.cpp
+    src/style.cpp
+    src/formatconverter.cpp
+    src/conversiondialog.cpp
 )
 
 set(HEADERS
@@ -35,6 +38,9 @@ set(HEADERS
     src/song.h
     src/lyricsdecoder.h
     src/library.h
+    src/style.h
+    src/formatconverter.h
+    src/conversiondialog.h
 )
 
 # ── Executable ──
@@ -59,6 +65,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Multimedia
     Qt${QT_VERSION_MAJOR}::MultimediaWidgets
+)
+
+# ── FFmpeg Path (external process) ──
+# 将 ffmpeg.exe/ffprobe.exe 所在目录通过编译期定义传入
+set(FFMPEG_BIN_DIR "D:/programm/ffmpeg-2026-07-16-git-ceabc9b306-essentials_build/bin")
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    FFMPEG_BIN_DIR="${FFMPEG_BIN_DIR}"
 )
 
 # ── Compiler Warnings ──

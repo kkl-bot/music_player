@@ -9,6 +9,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTimer>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QWheelEvent>
 
@@ -22,6 +23,7 @@ class PlayTrack;
 class LyricsDecoder;
 class Library;
 class Song;
+class ConversionDialog;
 
 class MainWindow : public QMainWindow
 {
@@ -63,6 +65,12 @@ private:
     void restorePlaylistFromLibrary();
     /// 拖拽排序后从 QListWidget 顺序重建 Playlist
     void syncPlaylistFromUI();
+    /// 搜索过滤
+    void onSearchTextChanged(const QString &text);
+
+    // ── 格式转换 ──
+    void onShowConversionMenu(const QPoint &pos);
+    void onConvertSong(const QString &filePath, const QString &title);
 
     // ── 歌词 ──
     void updateLyrics(qint64 positionMs);
@@ -88,6 +96,7 @@ protected:
     Library       *m_library       = nullptr;
 
     // ── 左侧面板 ──
+    QLineEdit     *m_searchBox     = nullptr;   // 搜索框
     QListWidget   *m_listWidget    = nullptr;
     QLabel        *m_listCountLabel = nullptr;
 

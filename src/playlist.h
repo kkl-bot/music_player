@@ -62,6 +62,10 @@ public:
     /// 跳到指定索引
     void jumpTo(int index);
 
+    // ── 搜索过滤 ──
+    /// 返回所有标题或文件名包含 keyword（不区分大小写）的歌曲索引
+    QList<int> searchIndices(const QString &keyword) const;
+
     // ── 播放模式 ──
     void setRepeatMode(RepeatMode mode);
     RepeatMode repeatMode() const;

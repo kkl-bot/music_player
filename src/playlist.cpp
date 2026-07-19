@@ -1,5 +1,6 @@
 #include "playlist.h"
 #include <QRandomGenerator>
+#include <QFileInfo>
 
 // ════════════════════════════════════════════════════════════
 //  构造 / 析构
@@ -122,6 +123,28 @@ Song Playlist::songAt(int index) const
 const QList<Song> &Playlist::allSongs() const
 {
     return m_songs;
+}
+
+// ════════════════════════════════════════════════════════════
+//  搜索过滤
+// ════════════════════════════════════════════════════════════
+
+QList<int> Playlist::searchIndices(const QString &keyword) const
+{
+    if (keyword.isEmpty())
+        return {};
+
+    QList<int> result;
+    const QString lowerKw = keyword.toLower();
+    for (int i = 0; i < m_songs.size(); ++i) {
+        const Song &s = m_songs.at(i);
+        // 匹配标题或文件名（不区分大小写）
+        if (s.title.toLower().contains(lowerKw) ||
+            QFileInfo(s.filePath).completeBaseName().toLower().contains(lowerKw)) {
+            result.append(i);
+        }
+    }
+    return result;
 }
 
 // ════════════════════════════════════════════════════════════
