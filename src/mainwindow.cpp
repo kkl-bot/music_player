@@ -59,6 +59,16 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_btnLyricsOffsetDown, &QPushButton::clicked, this, [this]() { onLyricsOffsetAdjust(-500); });
     connect(m_btnLyricsOffsetUp,   &QPushButton::clicked, this, [this]() { onLyricsOffsetAdjust(+500); });
 
+    // 歌名滚动定时器
+    m_marqueeTimer = new QTimer(this);
+    m_marqueeTimer->setInterval(200);
+    connect(m_marqueeTimer, &QTimer::timeout, this, [this]() {
+        if (!m_songMarquee || m_songMarquee->text().length() < 15) return;
+        QString text = m_songMarquee->text();
+        m_marqueeOffset = (m_marqueeOffset + 1) % text.length();
+        m_songMarquee->setText(text.mid(m_marqueeOffset) + text.left(m_marqueeOffset));
+    });
+
     // 恢复上次状态
     m_currentTheme = static_cast<Style::Theme>(m_library->loadTheme(Style::Dark));
     qApp->setStyleSheet(Style::styleSheet(m_currentTheme));
@@ -343,17 +353,17 @@ void MainWindow::setupCentralWidget()
     splitter->setSizes({0, 1});         // 初始左面板宽度为 0
 
     // ════════════════════════════════════════════════════════
-    //  底部控制栏
+    //  底部控制栏（胶囊风格，参考 Fleet-Snowfluff）
     // ════════════════════════════════════════════════════════
     QWidget *controlBar = new QWidget(this);
     controlBar->setObjectName(QStringLiteral("controlBar"));
     QVBoxLayout *ctrlLayout = new QVBoxLayout(controlBar);
-    ctrlLayout->setContentsMargins(12, 6, 12, 10);
-    ctrlLayout->setSpacing(4);
+    ctrlLayout->setContentsMargins(16, 8, 16, 10);
+    ctrlLayout->setSpacing(6);
 
     // ── 进度条 ──
     QHBoxLayout *progressRow = new QHBoxLayout;
-    progressRow->setSpacing(8);
+    progressRow->setSpacing(10);
 
     m_timeCurrent = new QLabel(QStringLiteral("00:00"), this);
     m_timeCurrent->setObjectName(QStringLiteral("timeLabel"));
@@ -372,79 +382,87 @@ void MainWindow::setupCentralWidget()
 
     // ── 控制按钮 ──
     QHBoxLayout *btnRow = new QHBoxLayout;
-    btnRow->setSpacing(6);
+    btnRow->setSpacing(8);
 
-    // 播放列表切换按钮
-    m_btnPlaylist = new QPushButton(QStringLiteral("播放列表"), this);
+    // 播放列表
+    m_btnPlaylist = new QPushButton(QStringLiteral("☰"), this);
     m_btnPlaylist->setObjectName(QStringLiteral("ctrlBtn"));
-    m_btnPlaylist->setToolTip(QStringLiteral("显示 / 隐藏播放列表"));
+    m_btnPlaylist->setToolTip(QStringLiteral("播放列表"));
     m_btnPlaylist->setCheckable(true);
-    m_btnPlaylist->setFixedWidth(80);
-    m_btnPlaylist->setFixedHeight(36);
+    m_btnPlaylist->setFixedSize(36, 36);
     btnRow->addWidget(m_btnPlaylist);
 
-    // 可视化切换按钮
-    m_btnVisualizer = new QPushButton(QStringLiteral("可视化"), this);
+    // 可视化
+    m_btnVisualizer = new QPushButton(QStringLiteral("〰"), this);
     m_btnVisualizer->setObjectName(QStringLiteral("ctrlBtn"));
-    m_btnVisualizer->setToolTip(QStringLiteral("显示 / 隐藏音频可视化"));
+    m_btnVisualizer->setToolTip(QStringLiteral("音频可视化"));
     m_btnVisualizer->setCheckable(true);
-    m_btnVisualizer->setFixedWidth(72);
-    m_btnVisualizer->setFixedHeight(36);
+    m_btnVisualizer->setFixedSize(36, 36);
     btnRow->addWidget(m_btnVisualizer);
 
-    m_btnShuffle = new QPushButton(QStringLiteral("随机"), this);
-    m_btnShuffle->setObjectName(QStringLiteral("ctrlBtn"));
-    m_btnShuffle->setToolTip(QStringLiteral("随机播放"));
-    m_btnShuffle->setCheckable(true);
-    m_btnShuffle->setFixedSize(48, 36);
-    btnRow->addWidget(m_btnShuffle);
+    btnRow->addSpacing(8);
 
-    btnRow->addStretch();
+    // ── 旋转唱片 + 滚动歌名 ──
+    m_albumDisc = new QLabel(this);
+    m_albumDisc->setObjectName(QStringLiteral("albumDisc"));
+    m_albumDisc->setFixedSize(36, 36);
+    m_albumDisc->setAlignment(Qt::AlignCenter);
+    m_albumDisc->setText(QStringLiteral("🎵"));
+    btnRow->addWidget(m_albumDisc);
 
+    m_songMarquee = new QLabel(QStringLiteral("—"), this);
+    m_songMarquee->setObjectName(QStringLiteral("songMarquee"));
+    m_songMarquee->setMinimumWidth(60);
+    btnRow->addWidget(m_songMarquee, 1);
+
+    // 上一曲
     m_btnPrev = new QPushButton(QStringLiteral("⏮"), this);
     m_btnPrev->setObjectName(QStringLiteral("ctrlBtn"));
     m_btnPrev->setToolTip(QStringLiteral("上一首"));
-    m_btnPrev->setFixedSize(36, 36);
+    m_btnPrev->setFixedSize(32, 32);
     btnRow->addWidget(m_btnPrev);
 
+    // 播放/暂停
     m_btnPlayPause = new QPushButton(QStringLiteral("▶"), this);
     m_btnPlayPause->setObjectName(QStringLiteral("playBtn"));
     m_btnPlayPause->setToolTip(QStringLiteral("播放/暂停"));
-    m_btnPlayPause->setFixedSize(44, 44);
+    m_btnPlayPause->setFixedSize(40, 40);
     btnRow->addWidget(m_btnPlayPause);
 
+    // 下一曲
     m_btnNext = new QPushButton(QStringLiteral("⏭"), this);
     m_btnNext->setObjectName(QStringLiteral("ctrlBtn"));
     m_btnNext->setToolTip(QStringLiteral("下一首"));
-    m_btnNext->setFixedSize(36, 36);
+    m_btnNext->setFixedSize(32, 32);
     btnRow->addWidget(m_btnNext);
 
-    btnRow->addStretch();
+    btnRow->addSpacing(8);
 
-    m_btnRepeat = new QPushButton(QStringLiteral("循环"), this);
-    m_btnRepeat->setObjectName(QStringLiteral("ctrlBtn"));
-    m_btnRepeat->setToolTip(QStringLiteral("循环模式"));
-    m_btnRepeat->setFixedSize(48, 36);
-    btnRow->addWidget(m_btnRepeat);
+    // 播放顺序
+    m_btnOrder = new QPushButton(QStringLiteral("□"), this);
+    m_btnOrder->setObjectName(QStringLiteral("ctrlBtn"));
+    m_btnOrder->setToolTip(QStringLiteral("列表循环"));
+    m_btnOrder->setFixedSize(32, 32);
+    btnRow->addWidget(m_btnOrder);
 
     // 音量
     m_btnMute = new QPushButton(QStringLiteral("🔊"), this);
     m_btnMute->setObjectName(QStringLiteral("ctrlBtn"));
     m_btnMute->setToolTip(QStringLiteral("静音"));
     m_btnMute->setCheckable(true);
-    m_btnMute->setFixedSize(36, 36);
+    m_btnMute->setFixedSize(32, 32);
     btnRow->addWidget(m_btnMute);
 
     m_volumeSlider = new QSlider(Qt::Horizontal, this);
     m_volumeSlider->setObjectName(QStringLiteral("volumeSlider"));
     m_volumeSlider->setRange(0, 100);
     m_volumeSlider->setValue(70);
-    m_volumeSlider->setFixedWidth(100);
+    m_volumeSlider->setFixedWidth(80);
     btnRow->addWidget(m_volumeSlider);
 
     m_volumeLabel = new QLabel(QStringLiteral("70"), this);
     m_volumeLabel->setObjectName(QStringLiteral("volumeLabel"));
-    m_volumeLabel->setFixedWidth(28);
+    m_volumeLabel->setFixedWidth(24);
     btnRow->addWidget(m_volumeLabel);
 
     ctrlLayout->addLayout(btnRow);
@@ -504,8 +522,7 @@ void MainWindow::connectSignals()
     connect(m_btnPlayPause, &QPushButton::clicked, this, &MainWindow::onPlayPause);
     connect(m_btnPrev,      &QPushButton::clicked, this, &MainWindow::onPrevious);
     connect(m_btnNext,      &QPushButton::clicked, this, &MainWindow::onNext);
-    connect(m_btnShuffle,   &QPushButton::clicked, this, &MainWindow::onToggleShuffle);
-    connect(m_btnRepeat,    &QPushButton::clicked, this, &MainWindow::onToggleRepeat);
+    connect(m_btnOrder,     &QPushButton::clicked, this, &MainWindow::onToggleOrder);
     connect(m_btnMute,      &QPushButton::clicked, this, &MainWindow::onToggleMute);
 
     // 进度条拖拽
@@ -644,6 +661,25 @@ void MainWindow::onSongSelected(int index)
         m_albumArt->setText(QStringLiteral("🎵"));
     }
 
+    // 更新控制栏唱片和歌名
+    {
+        if (!m_coverCache.isNull()) {
+            QPixmap disc = m_coverCache.scaled(36, 36, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            m_albumDisc->setPixmap(disc);
+        } else {
+            m_albumDisc->setText(QStringLiteral("🎵"));
+        }
+        QString display = song.displayTitle();
+        QString artist = song.displayArtist();
+        QString full = display + QStringLiteral(" — ") + artist + QStringLiteral(" ");
+        m_songMarquee->setText(full);
+        m_marqueeOffset = 0;
+        if (full.length() > 15)
+            m_marqueeTimer->start();
+        else
+            m_marqueeTimer->stop();
+    }
+
     // 重置歌词跟随状态
     m_lyricsFollowing = true;
     m_lyricsPlayBtn->hide();
@@ -766,30 +802,34 @@ void MainWindow::onToggleMute()
     m_btnMute->setText(muted ? QStringLiteral("🔇") : QStringLiteral("🔊"));
 }
 
-void MainWindow::onToggleShuffle()
+void MainWindow::onToggleOrder()
 {
-    const bool enabled = !m_playlist->isShuffle();
-    m_playlist->setShuffle(enabled);
-    m_btnShuffle->setChecked(enabled);
-    statusBar()->showMessage(enabled ? QStringLiteral("随机播放: 开")
-                                     : QStringLiteral("随机播放: 关"), 2000);
-}
+    // 0=列表循环  1=单曲循环  2=随机播放
+    m_playOrder = (m_playOrder + 1) % 3;
 
-void MainWindow::onToggleRepeat()
-{
-    using RM = Playlist::RepeatMode;
-    RM mode = m_playlist->repeatMode();
-    switch (mode) {
-    case RM::None: mode = RM::All;  break;
-    case RM::All:  mode = RM::One;  break;
-    case RM::One:  mode = RM::None; break;
+    switch (m_playOrder) {
+    case 0:
+        m_btnOrder->setText(QStringLiteral("□"));
+        m_btnOrder->setToolTip(QStringLiteral("列表循环"));
+        m_playlist->setShuffle(false);
+        m_playlist->setRepeatMode(Playlist::RepeatMode::All);
+        break;
+    case 1:
+        m_btnOrder->setText(QStringLiteral("↺"));
+        m_btnOrder->setToolTip(QStringLiteral("单曲循环"));
+        m_playlist->setShuffle(false);
+        m_playlist->setRepeatMode(Playlist::RepeatMode::One);
+        break;
+    case 2:
+        m_btnOrder->setText(QStringLiteral("↯"));
+        m_btnOrder->setToolTip(QStringLiteral("随机播放"));
+        m_playlist->setShuffle(true);
+        m_playlist->setRepeatMode(Playlist::RepeatMode::All);
+        break;
     }
-    m_playlist->setRepeatMode(mode);
-    m_btnRepeat->setText(mode == RM::One ? QStringLiteral("单曲") : QStringLiteral("循环"));
-    statusBar()->showMessage(
-        mode == RM::None ? QStringLiteral("循环: 关闭") :
-        mode == RM::All  ? QStringLiteral("循环: 列表循环") :
-                           QStringLiteral("循环: 单曲循环"), 2000);
+
+    const QString msgs[] = { QStringLiteral("列表循环"), QStringLiteral("单曲循环"), QStringLiteral("随机播放") };
+    statusBar()->showMessage(msgs[m_playOrder], 2000);
 }
 
 void MainWindow::onSeek(int value)
@@ -838,10 +878,22 @@ void MainWindow::restorePlaylistFromLibrary()
 {
     int repeatMode = m_library->loadRepeatMode();
     m_playlist->setRepeatMode(static_cast<Playlist::RepeatMode>(repeatMode));
-    m_playlist->setShuffle(m_library->loadShuffle());
-    m_btnShuffle->setChecked(m_playlist->isShuffle());
-    if (repeatMode == 1) m_btnRepeat->setText(QStringLiteral("单曲"));
+    bool shuffle = m_library->loadShuffle();
 
+    // 同步播放顺序按钮
+    if (shuffle) {
+        m_playOrder = 2;
+        m_btnOrder->setText(QStringLiteral("↯"));
+        m_btnOrder->setToolTip(QStringLiteral("随机播放"));
+    } else if (repeatMode == 1) {
+        m_playOrder = 1;
+        m_btnOrder->setText(QStringLiteral("↺"));
+        m_btnOrder->setToolTip(QStringLiteral("单曲循环"));
+    } else {
+        m_playOrder = 0;
+        m_btnOrder->setText(QStringLiteral("□"));
+        m_btnOrder->setToolTip(QStringLiteral("列表循环"));
+    }
     int savedIndex = -1;
     QList<Song> savedSongs = m_library->loadPlaylist(savedIndex);
     if (!savedSongs.isEmpty()) {

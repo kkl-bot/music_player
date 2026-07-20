@@ -52,7 +52,7 @@ QString Style::darkStyleSheet()
         }
 
         /*************************************************
-         *  左侧播放列表
+         *  左侧播放列表（Fleet-Snowfluff 风格）
          *************************************************/
         #leftPanel {
             background: #151515;
@@ -79,18 +79,22 @@ QString Style::darkStyleSheet()
             background: #171717;
             border: none;
             outline: none;
+            font-size: 14px;
         }
         QListWidget::item {
-            height: 42px;
-            padding-left: 15px;
+            padding: 10px 16px;
             border-radius: 8px;
+            border-left: 3px solid transparent;
+            margin: 2px 6px;
         }
         QListWidget::item:hover {
             background: #2a2a2a;
+            border-left-color: rgba(255,183,197,0.3);
         }
         QListWidget::item:selected {
             background: #3a2020;
             color: #ff5252;
+            border-left: 3px solid #ff5252;
         }
 
         /*************************************************
@@ -160,37 +164,37 @@ QString Style::darkStyleSheet()
         }
 
         /*************************************************
-         *  底部控制栏
+         *  底部控制栏（胶囊风格）
          *************************************************/
         #controlBar {
             background: #181818;
             border-top: 1px solid #333;
         }
         #ctrlBtn {
-            background: #242424;
+            background: transparent;
             border: none;
-            border-radius: 22px;
-            min-width: 40px;
-            min-height: 40px;
-            font-size: 18px;
+            border-radius: 16px;
+            min-width: 32px;
+            min-height: 32px;
+            font-size: 16px;
             color: #cccccc;
         }
         #ctrlBtn:hover {
-            background: #333;
+            background: rgba(255,255,255,0.1);
             color: #fff;
         }
         #ctrlBtn:checked {
             color: #ff5252;
         }
         #ctrlBtn:pressed {
-            background: #444;
+            background: rgba(255,255,255,0.15);
         }
         #playBtn {
-            min-width: 55px;
-            min-height: 55px;
-            border-radius: 28px;
+            min-width: 40px;
+            min-height: 40px;
+            border-radius: 20px;
             color: white;
-            font-size: 20px;
+            font-size: 18px;
             border: none;
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                 stop:0 #ff5252, stop:1 #d50000);
@@ -201,6 +205,22 @@ QString Style::darkStyleSheet()
         }
         #playBtn:pressed {
             background: #b71c1c;
+        }
+        /* 旋转唱片 */
+        #albumDisc {
+            background: #222;
+            border: 2px solid rgba(255,255,255,0.15);
+            border-radius: 18px;
+            font-size: 18px;
+        }
+        /* 滚动歌名 */
+        #songMarquee {
+            font-size: 13px;
+            color: #e0e6ff;
+            min-width: 60px;
+            font-family: "Segoe UI","Microsoft YaHei",sans-serif;
+            letter-spacing: 0;
+            padding: 0 2px;
         }
         #volumeLabel {
             font-size: 12px;
@@ -572,37 +592,37 @@ QString Style::lightStyleSheet()
         }
 
         /*************************************************
-         *  底部控制栏
+         *  底部控制栏（胶囊风格）
          *************************************************/
         #controlBar {
             background: #ffffff;
             border-top: 1px solid #ddd;
         }
         #ctrlBtn {
-            background: #e8e8e8;
+            background: transparent;
             border: none;
-            border-radius: 22px;
-            min-width: 40px;
-            min-height: 40px;
-            font-size: 18px;
+            border-radius: 16px;
+            min-width: 32px;
+            min-height: 32px;
+            font-size: 16px;
             color: #555555;
         }
         #ctrlBtn:hover {
-            background: #d0d0d0;
+            background: rgba(0,0,0,0.08);
             color: #333;
         }
         #ctrlBtn:checked {
             color: #e53935;
         }
         #ctrlBtn:pressed {
-            background: #ccc;
+            background: rgba(0,0,0,0.12);
         }
         #playBtn {
-            min-width: 55px;
-            min-height: 55px;
-            border-radius: 28px;
+            min-width: 40px;
+            min-height: 40px;
+            border-radius: 20px;
             color: white;
-            font-size: 20px;
+            font-size: 18px;
             border: none;
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                 stop:0 #ff5252, stop:1 #d50000);
@@ -613,6 +633,22 @@ QString Style::lightStyleSheet()
         }
         #playBtn:pressed {
             background: #b71c1c;
+        }
+        /* 旋转唱片 */
+        #albumDisc {
+            background: #eee;
+            border: 2px solid rgba(0,0,0,0.15);
+            border-radius: 18px;
+            font-size: 18px;
+        }
+        /* 滚动歌名 */
+        #songMarquee {
+            font-size: 13px;
+            color: #333;
+            min-width: 60px;
+            font-family: "Segoe UI","Microsoft YaHei",sans-serif;
+            letter-spacing: 0;
+            padding: 0 2px;
         }
         #volumeLabel {
             font-size: 12px;

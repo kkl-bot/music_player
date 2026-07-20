@@ -57,8 +57,7 @@ private:
     void updateDurationUI(qint64 durationMs);
     void onVolumeChanged(int percent);
     void onToggleMute();
-    void onToggleShuffle();
-    void onToggleRepeat();
+
     void onSeek(int value);
 
     // ── 列表 / 库 ──
@@ -84,6 +83,9 @@ private:
 
     // ── 播放列表切换 ──
     void onTogglePlaylist();
+
+    // ── 播放顺序切换 ──
+    void onToggleOrder();
 
     // ── 歌词 ──
     void updateLyrics(qint64 positionMs);
@@ -136,8 +138,14 @@ protected:
     QPushButton   *m_btnPlayPause  = nullptr;
     QPushButton   *m_btnPrev       = nullptr;
     QPushButton   *m_btnNext       = nullptr;
-    QPushButton   *m_btnShuffle    = nullptr;
-    QPushButton   *m_btnRepeat     = nullptr;
+    QPushButton   *m_btnOrder      = nullptr;
+
+    // ── 唱片 + 歌名滚动 ──
+    QLabel        *m_albumDisc     = nullptr;
+    QLabel        *m_songMarquee   = nullptr;
+    QTimer        *m_marqueeTimer  = nullptr;
+    int            m_playOrder     = 0;   // 0=列表 1=单曲 2=随机
+    int            m_marqueeOffset = 0;
 
     // ── 音量 ──
     QPushButton   *m_btnMute       = nullptr;
