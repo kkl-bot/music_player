@@ -56,6 +56,16 @@ public:
     /// 从显示名称解析格式
     static Format formatFromDisplayName(const QString &displayName);
 
+    // ── ffmpeg/ffprobe 路径 ──
+
+    /// 返回 ffmpeg.exe 完整路径
+    static QString ffmpegPath();
+    /// 返回 ffprobe.exe 完整路径
+    static QString ffprobePath();
+
+    /// 用 ffprobe 读取音频文件的艺术家标签
+    static QString probeArtist(const QString &filePath);
+
 signals:
     /// 转换进度 (0~100)
     void progressChanged(int percent);
@@ -81,11 +91,6 @@ private:
     QStringList buildArguments(const QString &inputFile,
                                const QString &outputFile,
                                Format fmt) const;
-
-    /// 返回 ffmpeg.exe 完整路径
-    static QString ffmpegPath();
-    /// 返回 ffprobe.exe 完整路径
-    static QString ffprobePath();
 
     QProcess *m_process     = nullptr;
     QString   m_inputFile;

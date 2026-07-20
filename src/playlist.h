@@ -48,6 +48,7 @@ public:
     void setCurrentIndex(int index);
 
     Song currentSong() const;
+    Song &currentSongRef();
     bool hasCurrent() const;
 
     // ── 导航 ──

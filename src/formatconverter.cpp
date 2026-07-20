@@ -228,6 +228,23 @@ qint64 FormatConverter::parseFfmpegTime(const QString &line)
          + ms;
 }
 
+QString FormatConverter::probeArtist(const QString &filePath)
+{
+    QProcess probe;
+    probe.start(ffprobePath(), {
+        QStringLiteral("-v"), QStringLiteral("quiet"),
+        QStringLiteral("-show_entries"), QStringLiteral("format_tags=artist"),
+        QStringLiteral("-of"), QStringLiteral("default=noprint_wrappers=1:nokey=1"),
+        filePath
+    });
+
+    if (!probe.waitForFinished(10000))
+        return {};
+
+    const QString output = QString::fromUtf8(probe.readAllStandardOutput()).trimmed();
+    return output;
+}
+
 QString FormatConverter::ffmpegPath()
 {
 #ifdef FFMPEG_BIN_DIR

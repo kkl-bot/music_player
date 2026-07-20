@@ -14,6 +14,7 @@
 #include <QWheelEvent>
 
 #include "player.h"
+#include "style.h"
 
 #include <QPixmap>
 #include <QResizeEvent>
@@ -24,6 +25,7 @@ class LyricsDecoder;
 class Library;
 class Song;
 class ConversionDialog;
+class AudioVisualizer;
 
 class MainWindow : public QMainWindow
 {
@@ -41,7 +43,7 @@ private:
     void setupUI();
     void setupMenuBar();
     void setupCentralWidget();
-    void setupStyleSheet();
+
 
     void connectSignals();
 
@@ -68,9 +70,20 @@ private:
     /// 搜索过滤
     void onSearchTextChanged(const QString &text);
 
+    // ── 主题切换 ──
+    void onToggleTheme();
+
+    // ── DIY 背景 ──
+    void onSelectBgFolder();
+    void applyBackgrounds(const QString &folderPath);
+    void clearBackgrounds();
+
     // ── 格式转换 ──
     void onShowConversionMenu(const QPoint &pos);
     void onConvertSong(const QString &filePath, const QString &title);
+
+    // ── 播放列表切换 ──
+    void onTogglePlaylist();
 
     // ── 歌词 ──
     void updateLyrics(qint64 positionMs);
@@ -95,9 +108,10 @@ protected:
     LyricsDecoder *m_subtitle     = nullptr;
     Library       *m_library       = nullptr;
 
-    // ── 左侧面板 ──
-    QLineEdit     *m_searchBox     = nullptr;   // 搜索框
-    QListWidget   *m_listWidget    = nullptr;
+    // ── 左侧面板（可切换） ──
+    QWidget       *m_leftPanel      = nullptr;
+    QLineEdit     *m_searchBox      = nullptr;   // 搜索框
+    QListWidget   *m_listWidget     = nullptr;
     QLabel        *m_listCountLabel = nullptr;
 
     // ── 右侧面板 ──
@@ -117,6 +131,8 @@ protected:
     QLabel        *m_timeTotal     = nullptr;
 
     // ── 控制按钮 ──
+    QPushButton   *m_btnPlaylist   = nullptr;
+    QPushButton   *m_btnVisualizer = nullptr;
     QPushButton   *m_btnPlayPause  = nullptr;
     QPushButton   *m_btnPrev       = nullptr;
     QPushButton   *m_btnNext       = nullptr;
@@ -135,7 +151,12 @@ protected:
     bool         m_lyricsSuppressScroll = false;// 抑制程序化滚动触发检测
     QPoint       m_lyricsWheelPos;              // 最近一次鼠标滚轮位置（viewport 坐标）
 
+    // ── 可视化 ──
+    AudioVisualizer *m_visualizer = nullptr;
+
     // ── 状态追踪 ──
+    Style::Theme m_currentTheme = Style::Dark;
+    QString m_diyBgFolder;
     bool m_userDragging = false;        // 用户正在拖拽进度条
     bool m_manualTrackChange = false;   // 手动切歌中，防止 Stopped 额外触发 next
     QPixmap m_coverCache;               // 原始封面缓存，用于缩放

@@ -1,4 +1,5 @@
 #include "playtrack.h"
+#include "formatconverter.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -147,7 +148,8 @@ QList<Song> PlayTrack::scanFolder(const QString &dirPath)
             continue;
 
         Song song(fi.absoluteFilePath());
-        song.title = extractTitle(song.filePath);
+        song.title  = extractTitle(song.filePath);
+        song.artist = FormatConverter::probeArtist(song.filePath);
         result.append(song);
     }
 

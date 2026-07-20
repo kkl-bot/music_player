@@ -5,8 +5,8 @@
 #include "lyricsdecoder.h"
 #include "library.h"
 #include "song.h"
-#include "style.h"
 #include "conversiondialog.h"
+#include "visualizer.h"
 
 #include <QApplication>
 #include <QMenuBar>
@@ -24,6 +24,10 @@
 #include <QAbstractItemView>
 #include <QCursor>
 #include <QFileInfo>
+#include <QFileDialog>
+#include <QDir>
+#include <QImage>
+#include <QPalette>
 
 // ════════════════════════════════════════════════════════════
 //  构造 / 析构
@@ -56,11 +60,22 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_btnLyricsOffsetUp,   &QPushButton::clicked, this, [this]() { onLyricsOffsetAdjust(+500); });
 
     // 恢复上次状态
+    m_currentTheme = static_cast<Style::Theme>(m_library->loadTheme(Style::Dark));
+    qApp->setStyleSheet(Style::styleSheet(m_currentTheme));
+
+    m_diyBgFolder = m_library->loadDiyBgFolder();
+    if (!m_diyBgFolder.isEmpty())
+        applyBackgrounds(m_diyBgFolder);
+
     restorePlaylistFromLibrary();
     const int savedVol = m_library->loadVolume();
     m_player->setVolume(savedVol);
     m_volumeSlider->setValue(savedVol);
     m_player->setMuted(m_library->loadMuted());
+
+    // 启动提示
+    statusBar()->showMessage(
+        QStringLiteral("视图 → 选择背景图片文件夹 可自定义界面背景"), 5000);
 }
 
 MainWindow::~MainWindow() = default;
@@ -76,6 +91,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
     m_library->saveMuted(m_player->isMuted());
     m_library->saveRepeatMode(static_cast<int>(m_playlist->repeatMode()));
     m_library->saveShuffle(m_playlist->isShuffle());
+    m_library->saveTheme(static_cast<int>(m_currentTheme));
+    m_library->saveDiyBgFolder(m_diyBgFolder);
     m_library->saveWindowGeometry(saveGeometry());
     if (m_playlist->hasCurrent()) {
         const Song &cur = m_playlist->currentSong();
@@ -126,7 +143,6 @@ void MainWindow::setupUI()
 
     setupMenuBar();
     setupCentralWidget();
-    setupStyleSheet();
 
     const QByteArray geom = m_library->loadWindowGeometry();
     if (!geom.isEmpty())
@@ -169,6 +185,28 @@ void MainWindow::setupMenuBar()
     QAction *actPrev = playMenu->addAction(QStringLiteral("上一首"));
     actPrev->setShortcut(QKeySequence(QStringLiteral("Ctrl+Left")));
     connect(actPrev, &QAction::triggered, this, &MainWindow::onPrevious);
+
+    QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图(&V)"));
+    QAction *actToggleTheme = viewMenu->addAction(QStringLiteral("切换主题"));
+    actToggleTheme->setShortcut(QKeySequence(QStringLiteral("Ctrl+T")));
+    connect(actToggleTheme, &QAction::triggered, this, &MainWindow::onToggleTheme);
+
+    viewMenu->addSeparator();
+
+    QAction *actSelectBg = viewMenu->addAction(QStringLiteral("选择背景图片文件夹..."));
+    actSelectBg->setToolTip(QStringLiteral(
+        "将图片放入文件夹后选择，程序会按组件名自动匹配：\n"
+        "leftPanel  → 左侧面板\n"
+        "rightPanel → 右侧面板\n"
+        "controlBar → 底部控制栏\n"
+        "lyricsWidget → 歌词区域\n"
+        "albumArt   → 专辑封面区\n"
+        "支持 png / jpg / bmp / gif / webp 格式"));
+    connect(actSelectBg, &QAction::triggered, this, &MainWindow::onSelectBgFolder);
+
+    QAction *actClearBg = viewMenu->addAction(QStringLiteral("清除自定义背景"));
+    actClearBg->setToolTip(QStringLiteral("恢复默认背景颜色"));
+    connect(actClearBg, &QAction::triggered, this, &MainWindow::clearBackgrounds);
 }
 
 void MainWindow::setupCentralWidget()
@@ -185,9 +223,10 @@ void MainWindow::setupCentralWidget()
     splitter->setHandleWidth(1);
     mainLayout->addWidget(splitter, 1);
 
-    // ──── 左侧面板：播放列表 ────
-    QWidget *leftPanel = new QWidget(this);
-    QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
+    // ──── 左侧面板：播放列表（默认隐藏） ────
+    m_leftPanel = new QWidget(this);
+    m_leftPanel->setObjectName(QStringLiteral("leftPanel"));
+    QVBoxLayout *leftLayout = new QVBoxLayout(m_leftPanel);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
 
@@ -210,10 +249,12 @@ void MainWindow::setupCentralWidget()
     m_listCountLabel->setObjectName(QStringLiteral("countLabel"));
     leftLayout->addWidget(m_listCountLabel);
 
-    splitter->addWidget(leftPanel);
+    splitter->addWidget(m_leftPanel);
+    m_leftPanel->setVisible(false);   // 初始隐藏
 
     // ──── 右侧面板：歌曲信息 + 歌词 ────
     QWidget *rightPanel = new QWidget(this);
+    rightPanel->setObjectName(QStringLiteral("rightPanel"));
     QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(20, 20, 20, 10);
     rightLayout->setSpacing(8);
@@ -253,7 +294,7 @@ void MainWindow::setupCentralWidget()
         offsetRow->addStretch();
 
         m_btnLyricsOffsetDown = new QPushButton(QStringLiteral("−"), this);
-        m_btnLyricsOffsetDown->setObjectName(QStringLiteral("lyricsOffsetBtn"));
+        m_btnLyricsOffsetDown->setObjectName(QStringLiteral("lyricsAdjustBtn"));
         m_btnLyricsOffsetDown->setFixedSize(24, 24);
         m_btnLyricsOffsetDown->setToolTip(QStringLiteral("歌词提前 0.5 秒"));
         offsetRow->addWidget(m_btnLyricsOffsetDown);
@@ -265,7 +306,7 @@ void MainWindow::setupCentralWidget()
         offsetRow->addWidget(m_lyricsOffsetLabel);
 
         m_btnLyricsOffsetUp = new QPushButton(QStringLiteral("+"), this);
-        m_btnLyricsOffsetUp->setObjectName(QStringLiteral("lyricsOffsetBtn"));
+        m_btnLyricsOffsetUp->setObjectName(QStringLiteral("lyricsAdjustBtn"));
         m_btnLyricsOffsetUp->setFixedSize(24, 24);
         m_btnLyricsOffsetUp->setToolTip(QStringLiteral("歌词延后 0.5 秒"));
         offsetRow->addWidget(m_btnLyricsOffsetUp);
@@ -299,6 +340,7 @@ void MainWindow::setupCentralWidget()
     splitter->addWidget(rightPanel);
     splitter->setStretchFactor(0, 2);
     splitter->setStretchFactor(1, 3);
+    splitter->setSizes({0, 1});         // 初始左面板宽度为 0
 
     // ════════════════════════════════════════════════════════
     //  底部控制栏
@@ -331,6 +373,24 @@ void MainWindow::setupCentralWidget()
     // ── 控制按钮 ──
     QHBoxLayout *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
+
+    // 播放列表切换按钮
+    m_btnPlaylist = new QPushButton(QStringLiteral("播放列表"), this);
+    m_btnPlaylist->setObjectName(QStringLiteral("ctrlBtn"));
+    m_btnPlaylist->setToolTip(QStringLiteral("显示 / 隐藏播放列表"));
+    m_btnPlaylist->setCheckable(true);
+    m_btnPlaylist->setFixedWidth(80);
+    m_btnPlaylist->setFixedHeight(36);
+    btnRow->addWidget(m_btnPlaylist);
+
+    // 可视化切换按钮
+    m_btnVisualizer = new QPushButton(QStringLiteral("可视化"), this);
+    m_btnVisualizer->setObjectName(QStringLiteral("ctrlBtn"));
+    m_btnVisualizer->setToolTip(QStringLiteral("显示 / 隐藏音频可视化"));
+    m_btnVisualizer->setCheckable(true);
+    m_btnVisualizer->setFixedWidth(72);
+    m_btnVisualizer->setFixedHeight(36);
+    btnRow->addWidget(m_btnVisualizer);
 
     m_btnShuffle = new QPushButton(QStringLiteral("随机"), this);
     m_btnShuffle->setObjectName(QStringLiteral("ctrlBtn"));
@@ -389,11 +449,12 @@ void MainWindow::setupCentralWidget()
 
     ctrlLayout->addLayout(btnRow);
     mainLayout->addWidget(controlBar);
-}
 
-void MainWindow::setupStyleSheet()
-{
-    setStyleSheet(Style::styleSheet());
+    // ── 音频可视化 ──
+    m_visualizer = new AudioVisualizer(m_player->mediaPlayer(), centralWidget);
+    m_visualizer->setMinimumHeight(200);
+    m_visualizer->hide();
+    mainLayout->insertWidget(1, m_visualizer);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -432,6 +493,14 @@ void MainWindow::connectSignals()
             this, &MainWindow::onShowConversionMenu);
 
     // 控制按钮
+    connect(m_btnPlaylist,   &QPushButton::clicked, this, &MainWindow::onTogglePlaylist);
+    connect(m_btnVisualizer, &QPushButton::clicked, this, [this]() {
+        bool visible = !m_visualizer->isVisible();
+        m_visualizer->setVisible(visible);
+        m_btnVisualizer->setChecked(visible);
+        statusBar()->showMessage(
+            visible ? QStringLiteral("音频可视化已开启") : QStringLiteral("音频可视化已关闭"), 2000);
+    });
     connect(m_btnPlayPause, &QPushButton::clicked, this, &MainWindow::onPlayPause);
     connect(m_btnPrev,      &QPushButton::clicked, this, &MainWindow::onPrevious);
     connect(m_btnNext,      &QPushButton::clicked, this, &MainWindow::onNext);
@@ -487,6 +556,11 @@ void MainWindow::connectSignals()
     connect(m_player, &Player::artistChanged, this, [this](const QString &artist) {
         m_songArtist->setText(artist.isEmpty()
             ? QStringLiteral("未知艺术家") : artist);
+        // 回写到 Song 对象，确保关闭时持久化正确的艺术家
+        if (m_playlist->hasCurrent() && !artist.isEmpty()) {
+            Song &song = m_playlist->currentSongRef();
+            song.artist = artist;
+        }
     });
     connect(m_player, &Player::coverArtChanged, this, [this](const QPixmap &cover) {
         if (!cover.isNull()) {
@@ -579,6 +653,9 @@ void MainWindow::onSongSelected(int index)
     const qint64 savedOffset = m_library->loadLyricsOffset(song.filePath);
     m_subtitle->setUserOffset(savedOffset);
     updateLyricsOffsetLabel();
+
+    // 通知可视化组件新的音频源
+    m_visualizer->setSourceFile(song.filePath);
 
     m_subtitle->clear();
     m_lyricsWidget->clear();
@@ -1134,4 +1211,135 @@ void MainWindow::onConvertSong(const QString &filePath, const QString &title)
     ConversionDialog dlg(filePath, title, this);
     dlg.setModal(true);
     dlg.exec();
+}
+
+// ════════════════════════════════════════════════════════════
+//  播放列表切换
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::onTogglePlaylist()
+{
+    const bool visible = !m_leftPanel->isVisible();
+    m_leftPanel->setVisible(visible);
+    m_btnPlaylist->setChecked(visible);
+    m_btnPlaylist->setText(visible ? QStringLiteral("收起列表") : QStringLiteral("播放列表"));
+
+    if (visible && m_listWidget->count() > 0 && m_playlist->hasCurrent()) {
+        // 展开时滚动到当前播放项
+        m_listWidget->scrollToItem(m_listWidget->item(m_playlist->currentIndex()),
+                                   QAbstractItemView::PositionAtCenter);
+    }
+
+    statusBar()->showMessage(
+        visible ? QStringLiteral("播放列表已显示") : QStringLiteral("播放列表已隐藏"),
+        2000);
+}
+
+// ════════════════════════════════════════════════════════════
+//  主题切换
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::onToggleTheme()
+{
+    m_currentTheme = (m_currentTheme == Style::Dark) ? Style::Light : Style::Dark;
+
+    // 切换主题后保留自定义背景
+    if (!m_diyBgFolder.isEmpty())
+        applyBackgrounds(m_diyBgFolder);
+    else
+        qApp->setStyleSheet(Style::styleSheet(m_currentTheme));
+
+    const QString msg = (m_currentTheme == Style::Light)
+        ? QStringLiteral("已切换为亮色主题")
+        : QStringLiteral("已切换为深色主题");
+    statusBar()->showMessage(msg, 3000);
+}
+
+// ════════════════════════════════════════════════════════════
+//  DIY 背景
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::onSelectBgFolder()
+{
+    const QString dir = QFileDialog::getExistingDirectory(this,
+        QStringLiteral("选择背景图片文件夹"),
+        m_diyBgFolder.isEmpty() ? QDir::homePath() : m_diyBgFolder);
+
+    if (dir.isEmpty())
+        return;
+
+    m_diyBgFolder = dir;
+    applyBackgrounds(dir);
+    statusBar()->showMessage(QStringLiteral("自定义背景已应用: ") + dir, 3000);
+}
+
+void MainWindow::clearBackgrounds()
+{
+    m_diyBgFolder.clear();
+    // 重新应用样式表以恢复默认背景
+    qApp->setStyleSheet(Style::styleSheet(m_currentTheme));
+    statusBar()->showMessage(QStringLiteral("已清除自定义背景"), 2000);
+}
+
+void MainWindow::applyBackgrounds(const QString &folderPath)
+{
+    QDir dir(folderPath);
+    if (!dir.exists())
+        return;
+
+    // 先重置样式表（保留主题基础），再逐组件添加背景
+    QString baseSheet = Style::styleSheet(m_currentTheme);
+
+    // 支持的文件名 → 组件对象名映射
+    // 用户放置如 leftPanel.png, controlBar.jpg, rightPanel.png 等
+    struct BgMapping {
+        QString objectName;
+        QString fileName;
+    };
+    const BgMapping mappings[] = {
+        { QStringLiteral("leftPanel"),    QStringLiteral("leftPanel") },
+        { QStringLiteral("rightPanel"),   QStringLiteral("rightPanel") },
+        { QStringLiteral("controlBar"),   QStringLiteral("controlBar") },
+        { QStringLiteral("lyricsWidget"), QStringLiteral("lyricsWidget") },
+        { QStringLiteral("albumArt"),     QStringLiteral("albumArt") },
+    };
+
+    QStringList bgRules;
+    for (const auto &m : mappings) {
+        // 尝试常见图片格式
+        static const char *exts[] = { "png", "jpg", "jpeg", "bmp", "gif", "webp" };
+        QString imagePath;
+        for (const char *ext : exts) {
+            QString candidate = dir.filePath(m.fileName + QStringLiteral(".") + QString::fromLatin1(ext));
+            if (QFileInfo::exists(candidate)) {
+                imagePath = candidate;
+                break;
+            }
+        }
+        if (imagePath.isEmpty())
+            continue;
+
+        // 将路径中的反斜杠转为正斜杠，QSS 要求
+        imagePath.replace(QStringLiteral("\\"), QStringLiteral("/"));
+
+        QString rule;
+        if (m.objectName == QStringLiteral("albumArt")) {
+            // albumArt 是 QLabel，用 border-image 保持背景
+            rule = QStringLiteral("#%1 { border-image: url(%2); background: transparent; }")
+                       .arg(m.objectName, imagePath);
+        } else {
+            rule = QStringLiteral("#%1 { background-image: url(%2); background-repeat: no-repeat; background-position: center; }")
+                       .arg(m.objectName, imagePath);
+        }
+        bgRules.append(rule);
+    }
+
+    if (bgRules.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("文件夹中未找到匹配的图片文件（如 leftPanel.png, controlBar.jpg 等）"), 3000);
+        return;
+    }
+
+    // 合并样式：主题基础 + 自定义背景规则
+    QString fullSheet = baseSheet + QStringLiteral("\n") + bgRules.join(QStringLiteral("\n"));
+    qApp->setStyleSheet(fullSheet);
 }

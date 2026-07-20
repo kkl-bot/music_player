@@ -19,9 +19,10 @@ ConversionDialog::ConversionDialog(const QString &songPath,
     , m_songPath(songPath)
     , m_songTitle(songTitle)
 {
+    setObjectName(QStringLiteral("ConversionDialog"));
     setWindowTitle(QStringLiteral("格式转换"));
-    setMinimumSize(420, 200);
-    setMaximumSize(500, 300);
+    setMinimumSize(420, 260);
+    setMaximumSize(520, 360);
 
     m_converter = new FormatConverter(this);
 

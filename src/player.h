@@ -50,6 +50,9 @@ public:
     void setMuted(bool muted);
     bool isMuted() const;
 
+    // ── 底层访问（用于音频可视化等） ──
+    QMediaPlayer *mediaPlayer() const { return m_mediaPlayer; }
+
     // ── 状态查询 ──
     PlaybackState playbackState() const;
     bool isPlaying() const;

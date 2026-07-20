@@ -64,6 +64,14 @@ public:
     void saveLyricsOffset(const QString &songPath, qint64 offsetMs);
     qint64 loadLyricsOffset(const QString &songPath, qint64 defaultOffset = 0) const;
 
+    // ── 主题 ──
+    void saveTheme(int theme);
+    int loadTheme(int defaultTheme = 0) const;
+
+    // ── DIY 背景 ──
+    void saveDiyBgFolder(const QString &folderPath);
+    QString loadDiyBgFolder() const;
+
     // ── 窗口几何 ──
     void saveWindowGeometry(const QByteArray &geometry);
     QByteArray loadWindowGeometry() const;

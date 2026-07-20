@@ -4,7 +4,9 @@
 // ── QSettings 键名 ──
 static const QString kKeyLastFolder    = QStringLiteral("lastFolder");
 static const QString kKeyPlaylist      = QStringLiteral("playlist/songs");
-static const QString kKeyPlaylistTitles = QStringLiteral("playlist/titles");
+static const QString kKeyPlaylistTitles    = QStringLiteral("playlist/titles");
+static const QString kKeyPlaylistArtists   = QStringLiteral("playlist/artists");
+static const QString kKeyPlaylistDurations = QStringLiteral("playlist/durations");
 static const QString kKeyCurrentIndex  = QStringLiteral("playlist/currentIndex");
 static const QString kKeyVolume        = QStringLiteral("audio/volume");
 static const QString kKeyMuted         = QStringLiteral("audio/muted");
@@ -48,16 +50,23 @@ QString Library::loadLastFolder() const
 
 void Library::savePlaylist(const QList<Song> &songs, int currentIndex)
 {
-    QStringList paths, titles;
+    QStringList paths, titles, artists;
+    QList<qint64> durations;
     paths.reserve(songs.size());
     titles.reserve(songs.size());
+    artists.reserve(songs.size());
+    durations.reserve(songs.size());
     for (const auto &song : songs) {
         paths.append(song.filePath);
         titles.append(song.title);
+        artists.append(song.artist);
+        durations.append(song.durationMs);
     }
 
     m_settings.setValue(kKeyPlaylist, paths);
     m_settings.setValue(kKeyPlaylistTitles, titles);
+    m_settings.setValue(kKeyPlaylistArtists, artists);
+    m_settings.setValue(kKeyPlaylistDurations, QVariant::fromValue(durations));
     m_settings.setValue(kKeyCurrentIndex, currentIndex);
     m_settings.sync();
 }
@@ -66,8 +75,10 @@ QList<Song> Library::loadPlaylist(int &outCurrentIndex) const
 {
     outCurrentIndex = m_settings.value(kKeyCurrentIndex, -1).toInt();
 
-    const QStringList paths  = m_settings.value(kKeyPlaylist).toStringList();
-    const QStringList titles = m_settings.value(kKeyPlaylistTitles).toStringList();
+    const QStringList paths     = m_settings.value(kKeyPlaylist).toStringList();
+    const QStringList titles    = m_settings.value(kKeyPlaylistTitles).toStringList();
+    const QStringList artists   = m_settings.value(kKeyPlaylistArtists).toStringList();
+    const QList<QVariant> durVar = m_settings.value(kKeyPlaylistDurations).toList();
 
     QList<Song> songs;
     songs.reserve(paths.size());
@@ -81,6 +92,12 @@ QList<Song> Library::loadPlaylist(int &outCurrentIndex) const
         // 恢复保存的标题（不是文件名 completeBaseName）
         if (i < titles.size() && !titles.at(i).isEmpty())
             song.title = titles.at(i);
+        // 恢复保存的艺术家（避免重启后丢失）
+        if (i < artists.size() && !artists.at(i).isEmpty())
+            song.artist = artists.at(i);
+        // 恢复保存的时长
+        if (i < durVar.size() && durVar.at(i).isValid())
+            song.durationMs = durVar.at(i).toLongLong();
         songs.append(song);
     }
 
@@ -202,6 +219,40 @@ qint64 Library::loadLyricsOffset(const QString &songPath, qint64 defaultOffset) 
 
 // ════════════════════════════════════════════════════════════
 //  窗口几何
+// ════════════════════════════════════════════════════════════
+//  主题
+// ════════════════════════════════════════════════════════════
+
+static const QString kKeyTheme = QStringLiteral("app/theme");
+
+void Library::saveTheme(int theme)
+{
+    m_settings.setValue(kKeyTheme, theme);
+    m_settings.sync();
+}
+
+int Library::loadTheme(int defaultTheme) const
+{
+    return m_settings.value(kKeyTheme, defaultTheme).toInt();
+}
+
+// ════════════════════════════════════════════════════════════
+//  DIY 背景
+// ════════════════════════════════════════════════════════════
+
+static const QString kKeyDiyBg = QStringLiteral("app/diyBgFolder");
+
+void Library::saveDiyBgFolder(const QString &folderPath)
+{
+    m_settings.setValue(kKeyDiyBg, folderPath);
+    m_settings.sync();
+}
+
+QString Library::loadDiyBgFolder() const
+{
+    return m_settings.value(kKeyDiyBg).toString();
+}
+
 // ════════════════════════════════════════════════════════════
 
 void Library::saveWindowGeometry(const QByteArray &geometry)

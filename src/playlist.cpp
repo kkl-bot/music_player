@@ -171,6 +171,13 @@ Song Playlist::currentSong() const
         ? m_songs.at(m_currentIndex) : Song();
 }
 
+Song &Playlist::currentSongRef()
+{
+    static Song s_nullSong;
+    return (m_currentIndex >= 0 && m_currentIndex < m_songs.size())
+        ? m_songs[m_currentIndex] : s_nullSong;
+}
+
 bool Playlist::hasCurrent() const
 {
     return m_currentIndex >= 0 && m_currentIndex < m_songs.size();
