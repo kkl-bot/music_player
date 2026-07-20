@@ -7,6 +7,7 @@
 #include "song.h"
 #include "conversiondialog.h"
 #include "visualizer.h"
+#include "fleeteffects.h"
 
 #include <QApplication>
 #include <QMenuBar>
@@ -69,9 +70,16 @@ MainWindow::MainWindow(QWidget *parent)
         m_songMarquee->setText(text.mid(m_marqueeOffset) + text.left(m_marqueeOffset));
     });
 
+    // 初始化 Fleet-Snowfluff 特效（主题依赖，需先创建）
+    m_fleetFx = new FleetEffects(this);
+
     // 恢复上次状态
     m_currentTheme = static_cast<Style::Theme>(m_library->loadTheme(Style::Dark));
     qApp->setStyleSheet(Style::styleSheet(m_currentTheme));
+
+    // 特效随主题联动
+    if (m_currentTheme == Style::Fleet)
+        m_fleetFx->start();
 
     m_diyBgFolder = m_library->loadDiyBgFolder();
     if (!m_diyBgFolder.isEmpty())
@@ -197,9 +205,17 @@ void MainWindow::setupMenuBar()
     connect(actPrev, &QAction::triggered, this, &MainWindow::onPrevious);
 
     QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图(&V)"));
-    QAction *actToggleTheme = viewMenu->addAction(QStringLiteral("切换主题"));
-    actToggleTheme->setShortcut(QKeySequence(QStringLiteral("Ctrl+T")));
-    connect(actToggleTheme, &QAction::triggered, this, &MainWindow::onToggleTheme);
+    QMenu *themeMenu = viewMenu->addMenu(QStringLiteral("主题"));
+    auto addThemeAction = [&](const QString &label, Style::Theme theme) {
+        QAction *act = themeMenu->addAction(label);
+        act->setCheckable(true);
+        act->setChecked(m_currentTheme == theme);
+        connect(act, &QAction::triggered, this, [this, theme]() { switchTheme(theme); });
+        return act;
+    };
+    addThemeAction(QStringLiteral("深色"),       Style::Dark);
+    addThemeAction(QStringLiteral("亮色"),       Style::Light);
+    addThemeAction(QStringLiteral("Fleet-Snowfluff"), Style::Fleet);
 
     viewMenu->addSeparator();
 
@@ -303,7 +319,7 @@ void MainWindow::setupCentralWidget()
         offsetRow->setSpacing(4);
         offsetRow->addStretch();
 
-        m_btnLyricsOffsetDown = new QPushButton(QStringLiteral("−"), this);
+        m_btnLyricsOffsetDown = new QPushButton(QStringLiteral("➖"), this);
         m_btnLyricsOffsetDown->setObjectName(QStringLiteral("lyricsAdjustBtn"));
         m_btnLyricsOffsetDown->setFixedSize(24, 24);
         m_btnLyricsOffsetDown->setToolTip(QStringLiteral("歌词提前 0.5 秒"));
@@ -315,7 +331,7 @@ void MainWindow::setupCentralWidget()
         m_lyricsOffsetLabel->setFixedWidth(44);
         offsetRow->addWidget(m_lyricsOffsetLabel);
 
-        m_btnLyricsOffsetUp = new QPushButton(QStringLiteral("+"), this);
+        m_btnLyricsOffsetUp = new QPushButton(QStringLiteral("➕"), this);
         m_btnLyricsOffsetUp->setObjectName(QStringLiteral("lyricsAdjustBtn"));
         m_btnLyricsOffsetUp->setFixedSize(24, 24);
         m_btnLyricsOffsetUp->setToolTip(QStringLiteral("歌词延后 0.5 秒"));
@@ -453,17 +469,27 @@ void MainWindow::setupCentralWidget()
     m_btnMute->setFixedSize(32, 32);
     btnRow->addWidget(m_btnMute);
 
+    // 滑块+数值标签
+    QWidget *volContainer = new QWidget(this);
+    QHBoxLayout *volLayout = new QHBoxLayout(volContainer);
+    volLayout->setContentsMargins(0, 16, 0, 0);
+    volLayout->setSpacing(8);
+
     m_volumeSlider = new QSlider(Qt::Horizontal, this);
     m_volumeSlider->setObjectName(QStringLiteral("volumeSlider"));
     m_volumeSlider->setRange(0, 100);
     m_volumeSlider->setValue(70);
     m_volumeSlider->setFixedWidth(80);
-    btnRow->addWidget(m_volumeSlider);
+    m_volumeSlider->setFixedHeight(32);
+    m_volumeSlider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    volLayout->addWidget(m_volumeSlider, 0, Qt::AlignVCenter);
 
     m_volumeLabel = new QLabel(QStringLiteral("70"), this);
     m_volumeLabel->setObjectName(QStringLiteral("volumeLabel"));
     m_volumeLabel->setFixedWidth(24);
-    btnRow->addWidget(m_volumeLabel);
+    volLayout->addWidget(m_volumeLabel);
+
+    btnRow->addWidget(volContainer);
 
     ctrlLayout->addLayout(btnRow);
     mainLayout->addWidget(controlBar);
@@ -1282,20 +1308,43 @@ void MainWindow::onTogglePlaylist()
 //  主题切换
 // ════════════════════════════════════════════════════════════
 
-void MainWindow::onToggleTheme()
+void MainWindow::switchTheme(Style::Theme theme)
 {
-    m_currentTheme = (m_currentTheme == Style::Dark) ? Style::Light : Style::Dark;
+    m_currentTheme = theme;
 
-    // 切换主题后保留自定义背景
+    // 应用样式
     if (!m_diyBgFolder.isEmpty())
         applyBackgrounds(m_diyBgFolder);
     else
         qApp->setStyleSheet(Style::styleSheet(m_currentTheme));
 
-    const QString msg = (m_currentTheme == Style::Light)
-        ? QStringLiteral("已切换为亮色主题")
-        : QStringLiteral("已切换为深色主题");
-    statusBar()->showMessage(msg, 3000);
+    // Fleet-Snowfluff 特效联动
+    if (m_fleetFx) {
+        if (theme == Style::Fleet)
+            m_fleetFx->start();
+        else
+            m_fleetFx->stop();
+    }
+
+    // 更新菜单勾选状态
+    for (QAction *act : menuBar()->actions()) {
+        if (act->menu() && act->menu()->title() == QStringLiteral("主题")) {
+            for (QAction *sub : act->menu()->actions())
+                sub->setChecked(false);
+            if (int(theme) >= 0 && int(theme) < act->menu()->actions().size())
+                act->menu()->actions()[int(theme)]->setChecked(true);
+            break;
+        }
+    }
+
+    const QString names[] = { QStringLiteral("深色主题"), QStringLiteral("亮色主题"), QStringLiteral("Fleet-Snowfluff") };
+    statusBar()->showMessage(names[int(theme)] + QStringLiteral(" 已应用"), 3000);
+}
+
+void MainWindow::onToggleTheme()
+{
+    int next = (int(m_currentTheme) + 1) % 3;
+    switchTheme(Style::Theme(next));
 }
 
 // ════════════════════════════════════════════════════════════

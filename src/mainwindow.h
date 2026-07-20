@@ -26,6 +26,7 @@ class Library;
 class Song;
 class ConversionDialog;
 class AudioVisualizer;
+class FleetEffects;
 
 class MainWindow : public QMainWindow
 {
@@ -73,6 +74,7 @@ private:
     void onSearchTextChanged(const QString &text);
 
     // ── 主题切换 ──
+    void switchTheme(Style::Theme theme);
     void onToggleTheme();
 
     // ── DIY 背景 ──
@@ -164,6 +166,9 @@ protected:
 
     // ── 可视化 ──
     AudioVisualizer *m_visualizer = nullptr;
+
+    // ── Fleet-Snowfluff 特效 ──
+    FleetEffects *m_fleetFx = nullptr;
 
     // ── 状态追踪 ──
     Style::Theme m_currentTheme = Style::Dark;

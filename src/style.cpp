@@ -3,10 +3,9 @@
 QString Style::styleSheet(Theme theme)
 {
     switch (theme) {
-    case Light:
-        return lightStyleSheet();
-    default:
-        return darkStyleSheet();
+    case Light:  return lightStyleSheet();
+    case Fleet:  return fleetSnowfluffStyleSheet();
+    default:     return darkStyleSheet();
     }
 }
 
@@ -134,28 +133,28 @@ QString Style::darkStyleSheet()
             font-weight: bold;
         }
         #lyricsPlayBtn {
-            background: #e53935;
-            color: #fff;
+            background: transparent;
+            color: #ff5252;
             font-size: 14px;
-            border: none;
+            border: 1px solid rgba(255,82,82,0.3);
             border-radius: 18px;
         }
         #lyricsPlayBtn:hover {
-            background: #ff5252;
+            background: rgba(255,82,82,0.2);
         }
 
         /*************************************************
          *  歌词时间微调
          *************************************************/
         #lyricsAdjustBtn {
-            background: #252525;
-            border-radius: 15px;
-            padding: 6px 14px;
+            background: transparent;
+            border-radius: 12px;
+            padding: 0;
             font-size: 14px;
             font-weight: bold;
         }
         #lyricsAdjustBtn:hover {
-            background: #e53935;
+            background: rgba(229,57,53,0.3);
         }
         #lyricsOffsetLabel {
             font-size: 12px;
@@ -560,30 +559,30 @@ QString Style::lightStyleSheet()
             font-weight: bold;
         }
         #lyricsPlayBtn {
-            background: #e53935;
-            color: #fff;
+            background: transparent;
+            color: #e53935;
             font-size: 14px;
-            border: none;
+            border: 1px solid rgba(229,57,53,0.3);
             border-radius: 18px;
         }
         #lyricsPlayBtn:hover {
-            background: #ff5252;
+            background: rgba(229,57,53,0.15);
         }
 
         /*************************************************
          *  歌词时间微调
          *************************************************/
         #lyricsAdjustBtn {
-            background: #e0e0e0;
-            border-radius: 15px;
-            padding: 6px 14px;
+            background: transparent;
+            border-radius: 12px;
+            padding: 0;
             font-size: 14px;
             font-weight: bold;
             color: #555;
         }
         #lyricsAdjustBtn:hover {
-            background: #e53935;
-            color: #fff;
+            background: rgba(229,57,53,0.3);
+            color: #e53935;
         }
         #lyricsOffsetLabel {
             font-size: 12px;
@@ -866,5 +865,190 @@ QString Style::lightStyleSheet()
         QScrollBar::sub-page:horizontal {
             background: none;
         }
+    )");
+}
+
+QString Style::fleetSnowfluffStyleSheet()
+{
+    return QStringLiteral(R"(
+        /*************************************************
+         *  全局
+         *************************************************/
+        QWidget {
+            background-color: #0f1123;
+            color: #e0e6ff;
+            font-family: "Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+            font-size: 14px;
+        }
+        QMainWindow {
+            background: qlineargradient(x1:0, y1:0, x2:0.15, y2:1,
+                stop:0 #ffb7c5, stop:0.45 #a0c4ff, stop:1 #e0e6ff);
+        }
+
+        /*************************************************
+         *  菜单栏
+         *************************************************/
+        QMenuBar {
+            background: #181818;
+            color: #dddddd;
+            border-bottom: 1px solid rgba(160,196,255,0.2);
+        }
+        QMenuBar::item { padding: 6px 15px; }
+        QMenuBar::item:selected { background: #333; }
+        QMenu {
+            background: rgba(18,20,40,0.95);
+            border: 1px solid rgba(160,196,255,0.25);
+        }
+        QMenu::item { padding: 8px 25px; }
+        QMenu::item:selected { background: #ffb7c5; color: #0f1123; }
+
+        /*************************************************
+         *  左侧播放列表
+         *************************************************/
+        #leftPanel {
+            background: rgba(18,20,40,0.75);
+            border-right: 1px solid rgba(160,196,255,0.2);
+        }
+        #searchBox {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(160,196,255,0.2);
+            border-radius: 18px;
+            padding: 8px 15px;
+            color: #e0e6ff;
+        }
+        #searchBox:focus { border-color: #a0c4ff; }
+        #searchBox::placeholder { color: rgba(224,230,255,0.4); }
+        #countLabel { color: rgba(224,230,255,0.5); padding: 8px; }
+        QListWidget {
+            background: rgba(18,20,40,0.55);
+            border: none; outline: none;
+        }
+        QListWidget::item {
+            padding: 10px 16px; border-radius: 8px;
+            border-left: 3px solid transparent; margin: 2px 6px;
+        }
+        QListWidget::item:hover {
+            background: rgba(255,183,197,0.08);
+            border-left-color: rgba(255,183,197,0.3);
+        }
+        QListWidget::item:selected {
+            background: rgba(255,183,197,0.15);
+            color: #ffb7c5; border-left: 3px solid #ffb7c5;
+        }
+
+        /*************************************************
+         *  右侧歌曲信息
+         *************************************************/
+        #rightPanel {
+            background: qlineargradient(x1:0, y1:0, x2:0.15, y2:1,
+                stop:0 #ffb7c5, stop:0.45 #a0c4ff, stop:1 #e0e6ff);
+        }
+        #songTitle {font-size: 26px; font-weight: bold; color: rgb(69, 63, 143); background: transparent;}
+        #songArtist {font-size: 16px; color: rgb(69, 63, 143); background: transparent;}
+        #albumArt {
+            font-size: 64px; border-radius: 15px;
+            background: transparent;
+            border: 1px solid rgba(160,196,255,0.2);
+        }
+
+        /*************************************************
+         *  歌词区域
+         *************************************************/
+        #lyricsWidget {
+            background: transparent; border: none;
+            padding: 20px; font-size: 16px;
+        }
+        #lyricsWidget::item { height: 35px; color: rgb(69, 63, 143); }
+        #lyricsWidget::item:selected { color: #ffb7c5; font-weight: bold; }
+        #lyricsPlayBtn { background: transparent; color: #ffb7c5; border: 1px solid rgb(255, 183, 197); border-radius: 18px; }
+        #lyricsPlayBtn:hover { background: rgba(255,183,197,0.2); }
+        #lyricsAdjustBtn {
+            background: transparent; border-radius: 12px;
+            padding: 0; font-size: 14px; font-weight: bold;
+        }
+        #lyricsAdjustBtn:hover { background: rgba(255,183,197,0.25); color: #ffb7c5; }
+        #lyricsOffsetLabel { font-size: 12px; color: rgba(69, 63, 143, 0.5); min-width: 40px; background: transparent; }
+
+        /*************************************************
+         *  底部控制栏
+         *************************************************/
+        #controlBar { background: rgba(18,20,40,0.85); border-top: 1px solid rgba(160,196,255,0.15); }
+        #ctrlBtn {
+            background: transparent; border: none; border-radius: 16px;
+            min-width: 32px; min-height: 32px; font-size: 16px;
+            color: rgba(224,230,255,0.7);
+        }
+        #ctrlBtn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+        #ctrlBtn:checked { color: #ffb7c5; }
+        #ctrlBtn:pressed { background: rgba(255,255,255,0.12); }
+        #playBtn {
+            min-width: 40px; min-height: 40px; border-radius: 20px;
+            color: #0f1123; font-size: 18px; border: none;
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #ffb7c5, stop:1 #a0c4ff);
+        }
+        #playBtn:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #ffcdd5, stop:1 #b8d4ff); }
+        #playBtn:pressed { background: #e0a8b4; }
+        #albumDisc { background: rgba(255,255,255,0.04); border: 2px solid rgba(160,196,255,0.2); border-radius: 18px; }
+        #songMarquee { font-size: 13px; color: #e0e6ff; min-width: 60px; padding: 0 2px; }
+        #volumeLabel { font-size: 12px; color: rgba(224,230,255,0.5); }
+
+        /*************************************************
+         *  进度条
+         *************************************************/
+        #progressSlider::groove:horizontal { height: 6px; background: rgba(255,255,255,0.12); border-radius: 3px; }
+        #progressSlider::sub-page:horizontal { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #a0c4ff, stop:1 #ffb7c5); border-radius: 3px; }
+        #progressSlider::handle:horizontal { width: 14px; height: 14px; margin: -5px 0; background: #fff; border-radius: 7px; }
+        #progressSlider::handle:horizontal:hover { background: #ffb7c5; }
+        #progressSlider { background: transparent; }
+
+        /*************************************************
+         *  音量
+         *************************************************/
+        #volumeSlider::groove:horizontal { height: 5px; background: rgba(255,255,255,0.15); border-radius: 2px; }
+        #volumeSlider::sub-page:horizontal { background: #a0c4ff; border-radius: 2px; }
+        #volumeSlider::handle:horizontal { width: 12px; height: 12px; margin: -4px 0; background: #fff; border-radius: 6px; }
+        #volumeSlider::handle:horizontal:hover { background: #ffb7c5; }
+        #volumeSlider { background: transparent; }
+
+        #timeLabel { color: rgba(224,230,255,0.5); font-size: 13px; }
+
+        /*************************************************
+         *  通用按钮 / ComboBox / Dialog / Tooltip
+         *************************************************/
+        QPushButton { background: rgba(255,255,255,0.08); border: none; border-radius: 8px; padding: 8px 14px; color: #e0e6ff; }
+        QPushButton:hover { background: rgba(255,255,255,0.14); }
+        QPushButton:pressed { background: rgba(255,255,255,0.2); }
+        QPushButton:disabled { background: rgba(255,255,255,0.03); color: rgba(224,230,255,0.3); }
+
+        QComboBox { background: rgba(255,255,255,0.06); border: 1px solid rgba(160,196,255,0.2); border-radius: 8px; padding: 6px 12px; color: #e0e6ff; }
+        QComboBox:hover { border-color: #a0c4ff; }
+        QComboBox:focus { border-color: #a0c4ff; }
+        QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 24px; border-left: 1px solid rgba(160,196,255,0.15); }
+        QComboBox QAbstractItemView { background: rgba(18,20,40,0.95); color: #e0e6ff; border: 1px solid rgba(160,196,255,0.25); selection-background-color: #ffb7c5; selection-color: #0f1123; outline: none; }
+        QComboBox QAbstractItemView::item { padding: 5px 10px; }
+        QComboBox QAbstractItemView::item:hover { background: rgba(255,255,255,0.06); }
+
+        QDialog { background: rgba(15,17,35,0.95); }
+        #ConversionDialog QLabel { color: #e0e6ff; }
+        #ConversionDialog QProgressBar { height: 12px; border: none; background: rgba(255,255,255,0.08); border-radius: 6px; text-align: center; color: #e0e6ff; font-size: 12px; font-weight: bold; }
+        #ConversionDialog QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #a0c4ff, stop:1 #ffb7c5); border-radius: 6px; }
+
+        QToolTip { background: rgba(18,20,40,0.95); color: #e0e6ff; border: 1px solid rgba(160,196,255,0.3); padding: 5px; }
+
+        /*************************************************
+         *  状态栏 / 分割器 / 滚动条
+         *************************************************/
+        QStatusBar { background: rgba(18,20,40,0.8); color: rgba(224,230,255,0.5); border-top: 1px solid rgba(160,196,255,0.15); font-size: 12px; }
+        QSplitter::handle { background: rgba(160,196,255,0.15); width: 1px; }
+        QScrollBar:vertical { width: 6px; background: transparent; margin: 0; }
+        QScrollBar::handle:vertical { background: rgba(160,196,255,0.2); border-radius: 3px; min-height: 30px; }
+        QScrollBar::handle:vertical:hover { background: #ffb7c5; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+        QScrollBar:horizontal { height: 6px; background: transparent; margin: 0; }
+        QScrollBar::handle:horizontal { background: rgba(160,196,255,0.2); border-radius: 3px; min-width: 30px; }
+        QScrollBar::handle:horizontal:hover { background: #ffb7c5; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
     )");
 }

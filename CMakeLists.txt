@@ -29,11 +29,13 @@ set(SOURCES
     src/formatconverter.cpp
     src/conversiondialog.cpp
     src/visualizer.cpp
+    src/fleeteffects.cpp
 )
 
 set(HEADERS
     src/mainwindow.h
     src/visualizer.h
+    src/fleeteffects.h
     src/player.h
     src/playlist.h
     src/playtrack.h
