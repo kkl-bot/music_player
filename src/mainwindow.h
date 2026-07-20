@@ -47,6 +47,9 @@ private:
 
     void connectSignals();
 
+    // ── 统一播放当前歌曲（onSongSelected / onNext / onPrevious 共用） ──
+    void playCurrentSong();
+
     // ── 播放控制槽 ──
     void onPlayPause();
     void onNext();

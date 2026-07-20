@@ -615,11 +615,8 @@ void MainWindow::onNext()
         return;
     }
     m_manualTrackChange = true;
-    const Song song = m_playlist->next();
-    if (song.isValid()) {
-        m_player->setSource(song.url());
-        m_player->play();
-    }
+    m_playlist->next();
+    playCurrentSong();
 }
 
 void MainWindow::onPrevious()
@@ -629,20 +626,12 @@ void MainWindow::onPrevious()
         return;
     }
     m_manualTrackChange = true;
-    const Song song = m_playlist->previous();
-    if (song.isValid()) {
-        m_player->setSource(song.url());
-        m_player->play();
-    }
+    m_playlist->previous();
+    playCurrentSong();
 }
 
-void MainWindow::onSongSelected(int index)
+void MainWindow::playCurrentSong()
 {
-    if (index < 0 || index >= m_playlist->count())
-        return;
-
-    m_manualTrackChange = true;
-    m_playlist->setCurrentIndex(index);
     const Song &song = m_playlist->currentSong();
     if (!song.isValid()) return;
 
@@ -697,19 +686,15 @@ void MainWindow::onSongSelected(int index)
     m_lyricsWidget->clear();
 
     if (song.hasLyrics() && m_subtitle->load(song.lyricsPath)) {
-        // 填充所有歌词行到列表
         for (int i = 0; i < m_subtitle->lineCount(); ++i) {
             const auto line = m_subtitle->lineAt(i);
             auto *item = new QListWidgetItem(line.text);
             item->setTextAlignment(Qt::AlignCenter);
             m_lyricsWidget->addItem(item);
         }
-        // 默认高亮第一行
-        if (m_lyricsWidget->count() > 0) {
+        if (m_lyricsWidget->count() > 0)
             m_lyricsWidget->item(0)->setForeground(QColor("#e94560"));
-        }
     } else {
-        // 无歌词时显示占位
         auto *item = new QListWidgetItem(QStringLiteral("♪ 无歌词"));
         item->setTextAlignment(Qt::AlignCenter);
         m_lyricsWidget->addItem(item);
@@ -717,6 +702,16 @@ void MainWindow::onSongSelected(int index)
 
     m_player->setSource(song.url());
     m_player->play();
+}
+
+void MainWindow::onSongSelected(int index)
+{
+    if (index < 0 || index >= m_playlist->count())
+        return;
+
+    m_manualTrackChange = true;
+    m_playlist->setCurrentIndex(index);
+    playCurrentSong();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -745,11 +740,8 @@ void MainWindow::onPlayerStateChanged(Player::PlaybackState state)
         }
         // 自然结束 → 自动下一首
         if (m_playlist->hasNext()) {
-            const Song nextSong = m_playlist->next();
-            if (nextSong.isValid()) {
-                m_player->setSource(nextSong.url());
-                m_player->play();
-            }
+            m_playlist->next();
+            playCurrentSong();
         }
         break;
     }
@@ -1273,8 +1265,7 @@ void MainWindow::onTogglePlaylist()
 {
     const bool visible = !m_leftPanel->isVisible();
     m_leftPanel->setVisible(visible);
-    m_btnPlaylist->setChecked(visible);
-    m_btnPlaylist->setText(visible ? QStringLiteral("收起列表") : QStringLiteral("播放列表"));
+    m_btnPlaylist->setChecked(visible);   // checked → 红色 (#ff5252) 表示已展开
 
     if (visible && m_listWidget->count() > 0 && m_playlist->hasCurrent()) {
         // 展开时滚动到当前播放项
