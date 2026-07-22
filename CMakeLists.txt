@@ -72,8 +72,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # ── FFmpeg Path (external process) ──
-# 将 ffmpeg.exe/ffprobe.exe 所在目录通过编译期定义传入
-set(FFMPEG_BIN_DIR "D:/programm/ffmpeg-2026-07-16-git-ceabc9b306-essentials_build/bin")
+# ffmpeg.exe/ffprobe.exe 已复制到 bin/ 目录，通过编译期相对路径传入
+set(FFMPEG_BIN_DIR "${CMAKE_SOURCE_DIR}/bin")
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     FFMPEG_BIN_DIR="${FFMPEG_BIN_DIR}"
 )

@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QMenu>
 #include <QListWidget>
 #include <QLabel>
 #include <QPushButton>
@@ -166,6 +167,9 @@ protected:
 
     // ── 可视化 ──
     AudioVisualizer *m_visualizer = nullptr;
+
+    // ── 主题菜单（在 setupMenuBar 中创建，供 switchTheme 直接访问） ──
+    QMenu        *m_themeMenu   = nullptr;
 
     // ── Fleet-Snowfluff 特效 ──
     FleetEffects *m_fleetFx = nullptr;

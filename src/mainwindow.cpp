@@ -77,6 +77,16 @@ MainWindow::MainWindow(QWidget *parent)
     m_currentTheme = static_cast<Style::Theme>(m_library->loadTheme(Style::Dark));
     qApp->setStyleSheet(Style::styleSheet(m_currentTheme));
 
+    // 同步主题菜单勾选状态（setupMenuBar 只用了默认的 Dark）
+    if (m_themeMenu) {
+        const auto themeActions = m_themeMenu->actions();
+        for (QAction *a : themeActions)
+            a->setChecked(false);
+        const int idx = static_cast<int>(m_currentTheme);
+        if (idx >= 0 && idx < themeActions.size())
+            themeActions[idx]->setChecked(true);
+    }
+
     // 特效随主题联动
     if (m_currentTheme == Style::Fleet)
         m_fleetFx->start();
@@ -205,9 +215,9 @@ void MainWindow::setupMenuBar()
     connect(actPrev, &QAction::triggered, this, &MainWindow::onPrevious);
 
     QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("视图(&V)"));
-    QMenu *themeMenu = viewMenu->addMenu(QStringLiteral("主题"));
+    m_themeMenu = viewMenu->addMenu(QStringLiteral("主题"));
     auto addThemeAction = [&](const QString &label, Style::Theme theme) {
-        QAction *act = themeMenu->addAction(label);
+        QAction *act = m_themeMenu->addAction(label);
         act->setCheckable(true);
         act->setChecked(m_currentTheme == theme);
         connect(act, &QAction::triggered, this, [this, theme]() { switchTheme(theme); });
@@ -1326,15 +1336,14 @@ void MainWindow::switchTheme(Style::Theme theme)
             m_fleetFx->stop();
     }
 
-    // 更新菜单勾选状态
-    for (QAction *act : menuBar()->actions()) {
-        if (act->menu() && act->menu()->title() == QStringLiteral("主题")) {
-            for (QAction *sub : act->menu()->actions())
-                sub->setChecked(false);
-            if (int(theme) >= 0 && int(theme) < act->menu()->actions().size())
-                act->menu()->actions()[int(theme)]->setChecked(true);
-            break;
-        }
+    // 更新菜单勾选状态 — 先清除所有勾选，再勾选当前主题
+    if (m_themeMenu) {
+        const auto themeActions = m_themeMenu->actions();
+        for (QAction *a : themeActions)
+            a->setChecked(false);
+        const int idx = static_cast<int>(theme);
+        if (idx >= 0 && idx < themeActions.size())
+            themeActions[idx]->setChecked(true);
     }
 
     const QString names[] = { QStringLiteral("深色主题"), QStringLiteral("亮色主题"), QStringLiteral("Fleet-Snowfluff") };

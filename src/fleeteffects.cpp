@@ -3,10 +3,12 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QGuiApplication>
+#include <QApplication>
 #include <QScreen>
 #include <QRandomGenerator>
 #include <QFileInfo>
 #include <QMovie>
+#include <QResizeEvent>
 #include <cmath>
 #include <algorithm>
 
@@ -37,8 +39,10 @@ void FleetEffects::start()
 {
     m_enabled = true;
     if (m_overlay) {
-        m_overlay->show();
+        // 先更新覆盖层大小以匹配当前窗口尺寸
+        m_overlay->setGeometry(m_parent->rect());
         m_overlay->raise();
+        m_overlay->show();
     }
     if (m_petLabel) {
         m_petLabel->raise();
@@ -70,17 +74,26 @@ void FleetEffects::setEnabled(bool on)
 // ════════════════════════════════════════════════════════════
 
 void FleetEffects::initParticleImages()
-{
-    static const char *kFileNames[] = {
-        "assets/icon0.png", "assets/icon1.png",
-        "assets/icon2.png", "assets/icon3.png",
+{   
+    auto findpng = [](const QString &name) -> QString {
+        const QStringList dirs = {
+            QStringLiteral("assets/"),
+            QStringLiteral("../assets/"),
+            QStringLiteral("../../assets/"),
+        };
+        for (const auto &d : dirs) {
+            QString path = d + name;
+            if (QFileInfo::exists(path))
+                return path;
+        }
+        return {};
     };
     static const QColor kFallbackColors[] = {
         QColor(255,183,197), QColor(160,196,255),
         QColor(200,150,255), QColor(255,220,150),
     };
     for (int i = 0; i < 4; ++i) {
-        QPixmap pm(QString::fromLatin1(kFileNames[i]));
+        QPixmap pm(findpng(QString::fromLatin1("icon%1.png").arg(i)));
         if (pm.isNull()) {
             // 文件不存在时回退到内建像素方块
             pm = QPixmap(16, 16);
@@ -94,7 +107,7 @@ void FleetEffects::initParticleImages()
         }
         m_particleImages.append(pm);
     }
-}
+}   
 
 
 
@@ -152,7 +165,13 @@ void FleetEffects::startTimers()
         updateFallParticles();
         updateBurstParticles();
         updatePet();
-        m_overlay->update();
+        // 每帧同步覆盖层大小和层级，确保覆盖层始终覆盖整个父窗口且在最上层
+        if (m_overlay) {
+            if (m_overlay->size() != m_parent->size())
+                m_overlay->setGeometry(m_parent->rect());
+            m_overlay->raise();
+            m_overlay->update();
+        }
     });
 }
 
@@ -162,13 +181,17 @@ void FleetEffects::startTimers()
 
 bool FleetEffects::eventFilter(QObject *obj, QEvent *event)
 {
-    if (m_enabled && obj == m_parent && event->type() == QEvent::MouseButtonPress) {
+    if (m_enabled && event->type() == QEvent::MouseButtonPress) {
         auto *me = static_cast<QMouseEvent*>(event);
-        // 忽略对子控件（按钮等）的点击 → 只在空白区域触发
-        QWidget *child = m_parent->childAt(me->pos());
-        if (!child || child == m_overlay || child == m_petLabel)
-            emitBurst(me->pos());
+        // 检查鼠标点击是否发生在当前父窗口内（包括其所有子控件）
+        QWidget *w = qobject_cast<QWidget*>(obj);
+        if (w && (w == m_parent || m_parent->isAncestorOf(w))) {
+            // 所有位置都触发爆散（不影响控件交互，因为 eventFilter 返回 false 不吞事件）
+            QPoint localPos = m_parent->mapFromGlobal(me->globalPosition().toPoint());
+            emitBurst(localPos);
+        }
     }
+    // 返回 false 表示不拦截事件，控件交互不受影响
     return QObject::eventFilter(obj, event);
 }
 
@@ -178,7 +201,7 @@ bool FleetEffects::eventFilter(QObject *obj, QEvent *event)
 
 void FleetEffects::onMousePress(const QPoint &localPos)
 {
-    if (!m_enabled) return;
+    //if (!m_enabled) return;
     emitBurst(localPos);
 }
 
@@ -423,11 +446,11 @@ void FleetEffects::initOverlay()
     auto *overlay = new OverlayWidget(m_parent);
     overlay->m_effects = this;
     overlay->setGeometry(m_parent->rect());
-    overlay->raise();
     overlay->hide();
     m_overlay = overlay;
 
-    // 在父窗口上安装事件过滤器，捕获全局点击用于爆散效果
-    m_parent->removeEventFilter(this);
-    m_parent->installEventFilter(this);
+    // 在 QApplication 上安装事件过滤器，捕获整个窗口内的点击用于爆散效果
+    // 注：不能只装在 m_parent 上，因为 Qt 鼠标事件发给子控件而非父控件
+    qApp->removeEventFilter(this);
+    qApp->installEventFilter(this);
 }
