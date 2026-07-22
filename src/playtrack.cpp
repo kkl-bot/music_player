@@ -6,6 +6,7 @@
 #include <QFileDialog>
 #include <QDirIterator>
 #include <QRegularExpression>
+#include <QSet>
 #include <algorithm>
 
 // ════════════════════════════════════════════════════════════
@@ -60,18 +61,11 @@ bool PlayTrack::loadFromFolder(const QString &dirPath)
         return false;
     }
 
-    // ── 优先使用 Library 缓存 ──
-    if (m_library && m_library->hasFolderCache(canonical)) {
-        m_songs = m_library->loadCachedFolderSongs(canonical);
-        if (!m_songs.isEmpty()) {
-            m_currentFolder = canonical;
-            emit folderChanged(canonical);
-            emit songsLoaded(m_songs);
-            return true;
-        }
-    }
+    // ── 清除该文件夹的旧缓存，重新扫描 ──
+    if (m_library)
+        m_library->clearFolderCacheFor(canonical);
 
-    // ── 缓存未命中，扫描文件夹 ──
+    // ── 扫描文件夹 ──
     const QList<Song> songs = scanFolder(canonical);
 
     if (songs.isEmpty()) {
@@ -79,7 +73,7 @@ bool PlayTrack::loadFromFolder(const QString &dirPath)
         return false;
     }
 
-    // ── 写入 Library 缓存 ──
+    // ── 打包缓存 ──
     if (m_library)
         m_library->cacheFolderSongs(canonical, songs);
 
@@ -116,7 +110,49 @@ QString PlayTrack::currentFolder() const
 }
 
 // ════════════════════════════════════════════════════════════
-//  缓存管理（委托给 Library）
+//  文件夹变化检测
+// ════════════════════════════════════════════════════════════
+
+bool PlayTrack::refreshIfChanged()
+{
+    if (m_currentFolder.isEmpty() || !m_library)
+        return false;
+
+    // 快速扫描：只比较文件名集合，不读取元数据
+    QSet<QString> currentFiles;
+    QDirIterator it(m_currentFolder, QDir::Files | QDir::Readable, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        const QString suffix = it.fileInfo().suffix().toLower();
+        if (isSupportedAudio(suffix))
+            currentFiles.insert(it.fileInfo().absoluteFilePath());
+    }
+
+    // 比较当前缓存的文件列表
+    QSet<QString> cachedPaths;
+    for (const auto &s : m_songs)
+        cachedPaths.insert(s.filePath);
+
+    // 文件数量和内容相同 → 无变化
+    if (currentFiles == cachedPaths)
+        return false;
+
+    // 有变化 → 重新加载
+    qDebug("PlayTrack: folder content changed, re-scanning...");
+    const QList<Song> songs = scanFolder(m_currentFolder);
+    if (songs.isEmpty())
+        return false;
+
+    if (m_library)
+        m_library->cacheFolderSongs(m_currentFolder, songs);
+
+    m_songs = songs;
+    emit songsLoaded(m_songs);
+    return true;
+}
+
+// ════════════════════════════════════════════════════════════
+//  缓存管理
 // ════════════════════════════════════════════════════════════
 
 void PlayTrack::clearCache()
@@ -150,14 +186,14 @@ QList<Song> PlayTrack::scanFolder(const QString &dirPath)
         if (!isSupportedAudio(suffix))
             continue;
 
-        Song song(fi.absoluteFilePath());   // 构造函数已自动探测 artist/album/title
-        // 如果 probeAll 未读到标题，用文件名规则降级
+        Song song(fi.absoluteFilePath());   // 构造函数仅填入文件名信息
+
+        // ── 回退：元数据由 QMediaPlayer 播放时通过 mainwindow 信号回填 ──
         if (song.title.isEmpty() || song.title == fi.completeBaseName())
             song.title = extractTitle(fi.absoluteFilePath());
         result.append(song);
     }
 
-    // 按原始文件名排序（保留文件自身编号顺序）
     std::sort(result.begin(), result.end(),
               [](const Song &a, const Song &b) {
                   return QFileInfo(a.filePath).completeBaseName().toLower()

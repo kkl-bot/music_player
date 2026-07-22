@@ -98,6 +98,8 @@ private:
     void savePlaylistData();
     /// 从 Library 恢复歌单数据
     void restorePlaylistData();
+    /// 为当前曲目建立基于会话 ID 的元数据回填连接
+    void connectMetadataSession(const Song &song);
 
     // ── 主题切换 ──
     void switchTheme(Style::Theme theme);
@@ -225,6 +227,8 @@ protected:
     QString m_diyBgFolder;
     bool m_userDragging = false;        // 用户正在拖拽进度条
     bool m_manualTrackChange = false;   // 手动切歌中，防止 Stopped 额外触发 next
+    int  m_metadataSessionId = 0;        // 元数据回填会话 ID，每次切歌递增
+    QString m_currentPlayingPath;        // 当前正在播放的曲目路径（用于校验异步元数据回填）
     QPixmap m_coverCache;               // 原始封面缓存，用于缩放
     qint64 m_storedPosition = 0;        // 拖拽时保存的真实位置
 };

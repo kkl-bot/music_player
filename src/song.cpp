@@ -1,11 +1,10 @@
 #include "song.h"
-#include "formatconverter.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QPixmap>
 
 // ════════════════════════════════════════════════════════════
-//  构造 — 自动探测元数据
+//  构造 — 仅填入基于文件名的基本信息
 // ════════════════════════════════════════════════════════════
 
 Song::Song(const QString &filePath)
@@ -13,19 +12,8 @@ Song::Song(const QString &filePath)
 {
     const QFileInfo fi(filePath);
     title   = fi.completeBaseName();
-    artist  = {};
-    album   = {};
     lyricsPath = detectLyricsFile(filePath);
     coverPath  = detectCoverFile(filePath);
-
-    // 用 ffprobe 读取内嵌元数据覆盖默认值
-    const auto meta = FormatConverter::probeAll(filePath);
-    if (!meta.title.isEmpty())
-        title = meta.title;
-    if (!meta.artist.isEmpty())
-        artist = meta.artist;
-    if (!meta.album.isEmpty())
-        album = meta.album;
 }
 
 // ════════════════════════════════════════════════════════════

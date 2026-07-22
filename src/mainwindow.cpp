@@ -37,6 +37,16 @@ static const int kCoverSize = 280;
 #include <QImage>
 #include <QPalette>
 
+/// 返回 assets/icons/ 目录的绝对路径（从 exe 位置向上找两级到项目根目录）
+static QString iconsDir()
+{
+    // exe 位于 build/Debug/MusicPlayer.exe ，向上两级到项目根目录
+    QDir dir(QCoreApplication::applicationDirPath());
+    dir.cdUp();
+    dir.cdUp();
+    return dir.absolutePath() + QStringLiteral("/assets/icons/");
+}
+
 // ════════════════════════════════════════════════════════════
 //  构造 / 析构
 // ════════════════════════════════════════════════════════════
@@ -409,7 +419,7 @@ void MainWindow::setupCentralWidget()
     rightLayout->addWidget(m_lyricsWidget, 1);
 
     // 歌词跳转按钮：叠加在歌词区域中央偏右位置
-    m_lyricsPlayBtn = new QPushButton(QStringLiteral("▶"), m_lyricsWidget->viewport());
+    m_lyricsPlayBtn = new QPushButton(QIcon(iconsDir() + QStringLiteral("play.ico")), QString(), m_lyricsWidget->viewport());
     m_lyricsPlayBtn->setObjectName(QStringLiteral("lyricsPlayBtn"));
     m_lyricsPlayBtn->setFixedSize(36, 36);
     m_lyricsPlayBtn->setCursor(Qt::PointingHandCursor);
@@ -424,6 +434,8 @@ void MainWindow::setupCentralWidget()
     // ════════════════════════════════════════════════════════
     //  底部控制栏（胶囊风格，参考 Fleet-Snowfluff）
     // ════════════════════════════════════════════════════════
+
+
     QWidget *controlBar = new QWidget(this);
     controlBar->setObjectName(QStringLiteral("controlBar"));
     QVBoxLayout *ctrlLayout = new QVBoxLayout(controlBar);
@@ -485,21 +497,21 @@ void MainWindow::setupCentralWidget()
     btnRow->addWidget(m_songMarquee, 1);
 
     // 上一曲
-    m_btnPrev = new QPushButton(QStringLiteral("⏮"), this);
+    m_btnPrev = new QPushButton(QIcon(iconsDir() + QStringLiteral("prev.ico")), QString(), this);
     m_btnPrev->setObjectName(QStringLiteral("ctrlBtn"));
     m_btnPrev->setToolTip(QStringLiteral("上一首"));
     m_btnPrev->setFixedSize(32, 32);
     btnRow->addWidget(m_btnPrev);
 
     // 播放/暂停
-    m_btnPlayPause = new QPushButton(QStringLiteral("▶"), this);
+    m_btnPlayPause = new QPushButton(QIcon(iconsDir() + QStringLiteral("play.ico")), QString(), this);
     m_btnPlayPause->setObjectName(QStringLiteral("playBtn"));
     m_btnPlayPause->setToolTip(QStringLiteral("播放/暂停"));
     m_btnPlayPause->setFixedSize(40, 40);
     btnRow->addWidget(m_btnPlayPause);
 
     // 下一曲
-    m_btnNext = new QPushButton(QStringLiteral("⏭"), this);
+    m_btnNext = new QPushButton(QIcon(iconsDir() + QStringLiteral("next.ico")), QString(), this);
     m_btnNext->setObjectName(QStringLiteral("ctrlBtn"));
     m_btnNext->setToolTip(QStringLiteral("下一首"));
     m_btnNext->setFixedSize(32, 32);
@@ -663,26 +675,10 @@ void MainWindow::connectSignals()
     });
 
     // ── 元数据信号 ──
-    // 缓存中 artist/album 优先（来自扫描时 ffprobe 或 JSON 恢复），
-    // QMediaPlayer 仅在缓存空缺时补充，并同步刷新显示
-    connect(m_player, &Player::artistChanged, this, [this](const QString &artist) {
-        if (m_playlist->hasCurrent() && !artist.isEmpty()) {
-            Song &song = m_playlist->currentSongRef();
-            if (song.artist.isEmpty()) {
-                song.artist = artist;
-                updateArtistAlbumDisplay();   // 填充后刷新显示
-            }
-        }
-    });
-    connect(m_player, &Player::albumChanged, this, [this](const QString &album) {
-        if (m_playlist->hasCurrent() && !album.isEmpty()) {
-            Song &song = m_playlist->currentSongRef();
-            if (song.album.isEmpty()) {
-                song.album = album;
-                updateArtistAlbumDisplay();   // 填充后刷新显示
-            }
-        }
-    });
+    // QMediaPlayer 异步回填：每次切歌时断开旧连接重建新连接并捕获曲目路径，
+    // 防止队列中延迟到来的旧信号污染新曲目
+    // （永久连接在 playCurrentSong 中被动态替换）
+
     connect(m_player, &Player::coverArtChanged, this, [this](const QPixmap &cover) {
         if (!cover.isNull()) {
             m_coverCache = cover;
@@ -717,6 +713,11 @@ void MainWindow::onPlayPause()
 
 void MainWindow::onNext()
 {
+    // 切歌前检查文件夹变化
+    if (m_playTrack->refreshIfChanged()) {
+        statusBar()->showMessage(QStringLiteral("文件夹内容已更新"), 2000);
+    }
+
     if (!m_playlist->hasNext()) {
         statusBar()->showMessage(QStringLiteral("已是最后一首"), 2000);
         return;
@@ -728,6 +729,11 @@ void MainWindow::onNext()
 
 void MainWindow::onPrevious()
 {
+    // 切歌前检查文件夹变化
+    if (m_playTrack->refreshIfChanged()) {
+        statusBar()->showMessage(QStringLiteral("文件夹内容已更新"), 2000);
+    }
+
     if (!m_playlist->hasPrevious()) {
         statusBar()->showMessage(QStringLiteral("已是第一首"), 2000);
         return;
@@ -741,6 +747,9 @@ void MainWindow::playCurrentSong()
 {
     const Song &song = m_playlist->currentSong();
     if (!song.isValid()) return;
+
+    // 记录当前曲目路径，用于校验异步信号是否匹配
+    m_currentPlayingPath = song.filePath;
 
     m_songTitle->setText(song.displayTitle());
     updateArtistAlbumDisplay();
@@ -805,28 +814,42 @@ void MainWindow::playCurrentSong()
     m_player->setSource(song.url());
     m_player->play();
 
+    // 建立基于会话 ID 的元数据回填连接
+    connectMetadataSession(song);
+}
+
+void MainWindow::connectMetadataSession(const Song &song)
+{
+    // 切歌递增会话 ID，使旧连接捕获的 ID 失效
+    const int sessionId = ++m_metadataSessionId;
+    const QString playingPath = song.filePath;
+
     // ── 媒体加载后直接读取 QMediaPlayer 元数据（比 metaDataChanged 信号更可靠） ──
-    // 使用单次连接，避免反复触发
+    // 单次连接，断开后将不再触发
     auto *metaConn = new QMetaObject::Connection;
     *metaConn = connect(m_player, &Player::mediaLoaded, this,
-        [this, metaConn]() {
+        [this, metaConn, sessionId, playingPath]() {
             disconnect(*metaConn);
             delete metaConn;
 
-            if (!m_playlist->hasCurrent())
+            if (!m_playlist->hasCurrent() || sessionId != m_metadataSessionId)
+                return;
+            if (m_playlist->currentSong().filePath != playingPath)
                 return;
 
             Song &s = m_playlist->currentSongRef();
             bool changed = false;
 
             const QString plArtist = m_player->currentArtist();
-            if (s.artist.isEmpty() && !plArtist.isEmpty()) {
+            if (!plArtist.isEmpty() &&
+                (s.artist.isEmpty() || s.artist == QStringLiteral("未知艺术家"))) {
                 s.artist = plArtist;
                 changed = true;
             }
 
             const QString plAlbum = m_player->currentAlbum();
-            if (s.album.isEmpty() && !plAlbum.isEmpty()) {
+            if (!plAlbum.isEmpty() &&
+                (s.album.isEmpty() || s.album == QStringLiteral("未知专辑"))) {
                 s.album = plAlbum;
                 changed = true;
             }
@@ -834,10 +857,57 @@ void MainWindow::playCurrentSong()
             if (changed)
                 updateArtistAlbumDisplay();
         });
+
+    // ── artistChanged / albumChanged 动态单次连接 ──
+    // 每次 playCurrentSong 都会断开旧的并创建新的，确保捕获的 path 始终正确
+    auto *artistConn = new QMetaObject::Connection;
+    *artistConn = connect(m_player, &Player::artistChanged, this,
+        [this, artistConn, sessionId, playingPath](const QString &artist) {
+            disconnect(*artistConn);
+            delete artistConn;
+
+            if (!m_playlist->hasCurrent() || artist.isEmpty())
+                return;
+            if (sessionId != m_metadataSessionId)
+                return;
+            if (m_playlist->currentSong().filePath != playingPath)
+                return;
+
+            Song &song = m_playlist->currentSongRef();
+            if (song.artist.isEmpty() || song.artist == QStringLiteral("未知艺术家")) {
+                song.artist = artist;
+                updateArtistAlbumDisplay();
+            }
+        });
+
+    auto *albumConn = new QMetaObject::Connection;
+    *albumConn = connect(m_player, &Player::albumChanged, this,
+        [this, albumConn, sessionId, playingPath](const QString &album) {
+            disconnect(*albumConn);
+            delete albumConn;
+
+            if (!m_playlist->hasCurrent() || album.isEmpty())
+                return;
+            if (sessionId != m_metadataSessionId)
+                return;
+            if (m_playlist->currentSong().filePath != playingPath)
+                return;
+
+            Song &song = m_playlist->currentSongRef();
+            if (song.album.isEmpty() || song.album == QStringLiteral("未知专辑")) {
+                song.album = album;
+                updateArtistAlbumDisplay();
+            }
+        });
 }
 
 void MainWindow::onSongSelected(int index)
 {
+    // 点击播放前检查文件夹变化
+    if (m_playTrack->refreshIfChanged()) {
+        statusBar()->showMessage(QStringLiteral("文件夹内容已更新"), 2000);
+    }
+
     // 从 QListWidget item 获取文件路径，再查找 Playlist 中的实际索引
     if (index < 0 || index >= m_listWidget->count())
         return;
@@ -876,15 +946,15 @@ void MainWindow::onPlayerStateChanged(Player::PlaybackState state)
 {
     switch (state) {
     case Player::PlaybackState::Playing:
-        m_btnPlayPause->setText(QStringLiteral("⏸"));
+        m_btnPlayPause->setIcon(QIcon(iconsDir() + QStringLiteral("pause.ico")));
         m_btnPlayPause->setToolTip(QStringLiteral("暂停"));
         break;
     case Player::PlaybackState::Paused:
-        m_btnPlayPause->setText(QStringLiteral("▶"));
+        m_btnPlayPause->setIcon(QIcon(iconsDir() + QStringLiteral("play.ico")));
         m_btnPlayPause->setToolTip(QStringLiteral("播放"));
         break;
     case Player::PlaybackState::Stopped:
-        m_btnPlayPause->setText(QStringLiteral("▶"));
+        m_btnPlayPause->setIcon(QIcon(iconsDir() + QStringLiteral("play.ico")));
         m_btnPlayPause->setToolTip(QStringLiteral("播放"));
         // 手动切歌（下一首/上一首/双击列表）时，Stopped 由 setSource 触发，
         // 此时不应自动跳到下一首，否则会跳两首
@@ -989,11 +1059,25 @@ void MainWindow::onSeek(int value)
 
 void MainWindow::onFolderLoaded(const QList<Song> &songs)
 {
-    m_playlist->setSongs(songs);
+    // 切换文件夹：完全重置播放列表、播放状态、缓存视图
+    m_playlist->clear();
     m_listWidget->clear();
+    m_lyricsWidget->clear();
+    m_subtitle->clear();
+    m_coverCache = QPixmap();
+    m_albumArt->setText(QStringLiteral("🎵"));
+    m_songTitle->setText(QStringLiteral("—"));
+    m_songArtist->setText(QString());
+    m_albumDisc->setText(QStringLiteral("🎵"));
+    m_songMarquee->setText(QStringLiteral("—"));
+    m_marqueeTimer->stop();
+    m_player->stop();
+
+    // 重新设置歌曲列表
+    m_playlist->setSongs(songs);
     for (const auto &song : songs) {
         auto *item = new QListWidgetItem(song.displayTitle());
-        item->setData(Qt::UserRole, song.filePath);      // ← 存入路径
+        item->setData(Qt::UserRole, song.filePath);
         m_listWidget->addItem(item);
     }
 
@@ -1001,7 +1085,7 @@ void MainWindow::onFolderLoaded(const QList<Song> &songs)
     statusBar()->showMessage(QStringLiteral("已加载 %1 首歌曲").arg(songs.size()), 3000);
     m_library->saveLastFolder(m_playTrack->currentFolder());
 
-    // 重置视图到"所有歌曲"并刷新歌单选择器（分类列表更新）
+    // 重置视图到"所有歌曲"并刷新歌单选择器
     m_listMode = ListMode::AllSongs;
     m_currentFilterName.clear();
     rebuildPlaylistSelector();

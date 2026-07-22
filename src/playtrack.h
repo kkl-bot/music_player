@@ -14,8 +14,9 @@ class Library;
 ///
 /// 功能：
 ///   1. 弹出文件夹选择对话框，让用户选取音乐目录
-///   2. 递归扫描目录下所有支持的音频文件
-///   3. 通过 Library 缓存扫描结果，避免重复扫描
+///   2. 扫描文件夹，所有歌曲打包存入缓存
+///   3. 提供文件夹变化检测（新增/删除文件）
+///   4. 播放时歌曲信息直接从缓存读取，不再重新探测
 class PlayTrack : public QObject
 {
     Q_OBJECT
@@ -24,14 +25,11 @@ public:
     explicit PlayTrack(QObject *parent = nullptr);
     ~PlayTrack() override;
 
-    /// 设置 Library 指针（用于缓存读写）
     void setLibrary(Library *library);
 
     // ── 文件夹浏览与加载 ──
-    /// 弹出系统文件夹选择对话框，选择后自动扫描并加载
     bool browseAndLoad();
-
-    /// 直接指定文件夹路径加载（优先使用 Library 缓存）
+    /// 加载文件夹：清除旧缓存 → 扫描 → 缓存 → 发射 songsLoaded
     bool loadFromFolder(const QString &dirPath);
 
     // ── 访问曲目 ──
@@ -40,7 +38,12 @@ public:
     Song songAt(int index) const;
     QString currentFolder() const;
 
-    // ── 缓存管理（委托给 Library） ──
+    // ── 文件夹变化检测 ──
+    /// 快速扫描文件夹，检查文件数量/名称变化。有变化时自动重新加载。
+    /// @return true 如果文件夹内容有变化（已自动重载）
+    bool refreshIfChanged();
+
+    // ── 缓存管理 ──
     void clearCache();
     void clearCacheForFolder(const QString &dirPath);
 
@@ -50,9 +53,7 @@ signals:
     void loadFailed(const QString &errorMessage);
 
 private:
-    /// 扫描文件夹，返回所有支持的音频文件列表
     static QList<Song> scanFolder(const QString &dirPath);
-
     static QString extractTitle(const QString &filePath);
     static bool isSupportedAudio(const QString &suffix);
 

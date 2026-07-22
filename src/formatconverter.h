@@ -63,22 +63,8 @@ public:
     /// 返回 ffprobe.exe 完整路径
     static QString ffprobePath();
 
-    /// 从 ffprobe 读取的歌曲元数据
-    struct ProbeResult {
-        QString artist;
-        QString album;
-        QString title;
-        bool isValid() const { return !artist.isEmpty() || !album.isEmpty() || !title.isEmpty(); }
-    };
-
     /// 用 ffprobe 读取音频文件的艺术家标签
     static QString probeArtist(const QString &filePath);
-    /// 用 ffprobe 读取音频文件的专辑标签
-    static QString probeAlbum(const QString &filePath);
-    /// 用 ffprobe 读取音频文件的标题标签
-    static QString probeTitle(const QString &filePath);
-    /// 用单次 ffprobe 调用一次读取所有元数据（更高效）
-    static ProbeResult probeAll(const QString &filePath);
 
 signals:
     /// 转换进度 (0~100)
