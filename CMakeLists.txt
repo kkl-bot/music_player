@@ -10,6 +10,9 @@ project(MusicPlayer
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ── 输出目录：exe / DLL 统一放到项目根目录的 bin/ 文件夹 ──
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
+
 # ── Qt Auto-Processing ──
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -74,13 +77,21 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # ── FFmpeg Path (external process) ──
-# ffmpeg.exe/ffprobe.exe 已复制到 bin/ 目录，通过编译期相对路径传入
+# ffmpeg.exe/ffprobe.exe 已位于 bin/ 目录，exe 也在 bin/ 中，直接使用当前路径
 set(FFMPEG_BIN_DIR "${CMAKE_SOURCE_DIR}/bin")
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     FFMPEG_BIN_DIR="${FFMPEG_BIN_DIR}"
 )
 
-# ── 部署 Qt DLL（构建后自动拷贝到 exe 目录） ──
+# ── 复制资源文件（图标）到输出目录 ──
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets/icons"
+        "${CMAKE_SOURCE_DIR}/bin/assets/icons"
+    COMMENT "▶ 正在复制图标资源到 bin/assets/icons/ …"
+)
+
+# ── 部署 Qt DLL（构建后自动拷贝到 exe 所在目录 bin/） ──
 find_package(Qt6 REQUIRED COMPONENTS Core)
 get_target_property(QT_DEPLOY_TOOL Qt6::windeployqt LOCATION)
 if(NOT QT_DEPLOY_TOOL)
@@ -91,7 +102,7 @@ endif()
 if(QT_DEPLOY_TOOL)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND "${QT_DEPLOY_TOOL}" "$<TARGET_FILE:${PROJECT_NAME}>"
-        COMMENT "▶ 正在部署 Qt DLL 到输出目录…"
+        COMMENT "▶ 正在部署 Qt DLL 到 bin/ …"
     )
     message(STATUS "windeployqt: ${QT_DEPLOY_TOOL}")
 else()

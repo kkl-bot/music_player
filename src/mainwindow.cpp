@@ -37,14 +37,11 @@ static const int kCoverSize = 280;
 #include <QImage>
 #include <QPalette>
 
-/// 返回 assets/icons/ 目录的绝对路径（从 exe 位置向上找两级到项目根目录）
+/// 返回 assets/icons/ 目录的绝对路径（exe 在 bin/ 中，icons 在 bin/assets/icons/）
 static QString iconsDir()
 {
-    // exe 位于 build/Debug/MusicPlayer.exe ，向上两级到项目根目录
-    QDir dir(QCoreApplication::applicationDirPath());
-    dir.cdUp();
-    dir.cdUp();
-    return dir.absolutePath() + QStringLiteral("/assets/icons/");
+    return QCoreApplication::applicationDirPath()
+           + QStringLiteral("/assets/icons/");
 }
 
 // ════════════════════════════════════════════════════════════
