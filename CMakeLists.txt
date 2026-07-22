@@ -21,6 +21,7 @@ set(SOURCES
     src/mainwindow.cpp
     src/player.cpp
     src/playlist.cpp
+    src/playlistmanager.cpp
     src/playtrack.cpp
     src/song.cpp
     src/lyricsdecoder.cpp
@@ -38,6 +39,7 @@ set(HEADERS
     src/fleeteffects.h
     src/player.h
     src/playlist.h
+    src/playlistmanager.h
     src/playtrack.h
     src/song.h
     src/lyricsdecoder.h

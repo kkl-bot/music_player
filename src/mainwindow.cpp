@@ -4,10 +4,17 @@
 #include "playtrack.h"
 #include "lyricsdecoder.h"
 #include "library.h"
+#include "playlistmanager.h"
 #include "song.h"
 #include "conversiondialog.h"
 #include "visualizer.h"
 #include "fleeteffects.h"
+
+#include <QInputDialog>
+#include <QMessageBox>
+
+/// 封面显示目标尺寸（px），保持各歌曲间一致
+static const int kCoverSize = 280;
 
 #include <QApplication>
 #include <QMenuBar>
@@ -43,9 +50,16 @@ MainWindow::MainWindow(QWidget *parent)
     m_playTrack = new PlayTrack(this);
     m_subtitle  = new LyricsDecoder(this);
     m_library   = new Library(this);
+    m_playlistManager = new PlaylistManager(this);
+
+    // PlayTrack 使用 Library 做缓存持久化
+    m_playTrack->setLibrary(m_library);
 
     setupUI();
     connectSignals();
+
+    // 恢复歌单数据
+    restorePlaylistData();
 
     // 歌词回弹定时器（单次触发）
     m_lyricsRevertTimer = new QTimer(this);
@@ -130,6 +144,9 @@ void MainWindow::closeEvent(QCloseEvent *event)
             m_library->saveLyricsOffset(cur.filePath, m_subtitle->userOffset());
     }
 
+    // 保存歌单数据
+    savePlaylistData();
+
     QMainWindow::closeEvent(event);
 }
 
@@ -143,19 +160,19 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     updateCoverDisplay();
 }
 
-/// 将缓存的封面自适应缩放到专辑封面标签尺寸
+/// 将缓存的封面缩放到统一尺寸显示
 void MainWindow::updateCoverDisplay()
 {
-    if (m_coverCache.isNull())
+    if (m_coverCache.isNull()) {
+        // 无封面时仍保持占位区域大小一致，避免布局跳变
+        QPixmap empty(kCoverSize, kCoverSize);
+        empty.fill(Qt::transparent);
+        m_albumArt->setPixmap(empty);
         return;
-
-    // 取标签当前可用尺寸，保持 1:1 正方形的最大限度
-    const int maxSize = qMin(m_albumArt->width(), m_albumArt->height());
-    if (maxSize <= 0)
-        return;
+    }
 
     const QPixmap scaled = m_coverCache.scaled(
-        maxSize, maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        kCoverSize, kCoverSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     m_albumArt->setPixmap(scaled);
 }
 
@@ -191,7 +208,7 @@ void MainWindow::setupMenuBar()
 
     QAction *actClearCache = fileMenu->addAction(QStringLiteral("清空缓存"));
     connect(actClearCache, &QAction::triggered, this, [this]() {
-        PlayTrack::clearCache();
+        m_playTrack->clearCache();
         statusBar()->showMessage(QStringLiteral("缓存已清空"), 3000);
     });
 
@@ -259,12 +276,39 @@ void MainWindow::setupCentralWidget()
     splitter->setHandleWidth(1);
     mainLayout->addWidget(splitter, 1);
 
-    // ──── 左侧面板：播放列表（默认隐藏） ────
+    // ──── 左侧面板：播放列表 + 歌单管理（默认隐藏） ────
     m_leftPanel = new QWidget(this);
     m_leftPanel->setObjectName(QStringLiteral("leftPanel"));
     QVBoxLayout *leftLayout = new QVBoxLayout(m_leftPanel);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
+
+    // 歌单选择器
+    m_playlistList = new QListWidget(this);
+    m_playlistList->setObjectName(QStringLiteral("playlistList"));
+    m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_playlistList->setDragDropMode(QAbstractItemView::NoDragDrop);
+    m_playlistList->setFixedHeight(160);
+    leftLayout->addWidget(m_playlistList);
+
+    // 新建 / 删除歌单按钮
+    QHBoxLayout *playlistBtnLayout = new QHBoxLayout;
+    playlistBtnLayout->setContentsMargins(8, 4, 8, 4);
+    playlistBtnLayout->setSpacing(8);
+
+    m_btnNewPlaylist = new QPushButton(QStringLiteral("＋ 新建歌单"), this);
+    m_btnNewPlaylist->setObjectName(QStringLiteral("playlistBtn"));
+    m_btnNewPlaylist->setFixedHeight(30);
+    m_btnNewPlaylist->setCursor(Qt::PointingHandCursor);
+    playlistBtnLayout->addWidget(m_btnNewPlaylist);
+
+    m_btnDeletePlaylist = new QPushButton(QStringLiteral("✕ 删除"), this);
+    m_btnDeletePlaylist->setObjectName(QStringLiteral("playlistBtn"));
+    m_btnDeletePlaylist->setFixedHeight(30);
+    m_btnDeletePlaylist->setCursor(Qt::PointingHandCursor);
+    playlistBtnLayout->addWidget(m_btnDeletePlaylist);
+
+    leftLayout->addLayout(playlistBtnLayout);
 
     // 搜索框
     m_searchBox = new QLineEdit(this);
@@ -295,11 +339,10 @@ void MainWindow::setupCentralWidget()
     rightLayout->setContentsMargins(20, 20, 20, 10);
     rightLayout->setSpacing(8);
 
-    // 专辑封面占位 — 自适应
+    // 专辑封面占位 — 固定尺寸避免切歌时布局跳变
     m_albumArt = new QLabel(this);
     m_albumArt->setObjectName(QStringLiteral("albumArt"));
-    m_albumArt->setMinimumSize(80, 80);
-    m_albumArt->setMaximumSize(400, 400);
+    m_albumArt->setFixedSize(kCoverSize, kCoverSize);
     m_albumArt->setAlignment(Qt::AlignCenter);
     m_albumArt->setText(QStringLiteral("🎵"));
     {
@@ -525,11 +568,11 @@ void MainWindow::connectSignals()
                 statusBar()->showMessage(msg, 5000);
             });
 
-    // 列表点击 → 播放
+    // 列表点击 → 播放（兼容分类模式）
     connect(m_listWidget, &QListWidget::currentRowChanged,
-            this, &MainWindow::onSongSelected);
+            this, &MainWindow::onSongListItemClicked);
 
-    // 拖拽排序后同步 Playlist
+    // 拖拽排序后同步 Playlist（仅在全部歌曲/用户歌单模式启用拖拽）
     connect(m_listWidget->model(), &QAbstractItemModel::rowsMoved,
             this, &MainWindow::syncPlaylistFromUI);
 
@@ -541,10 +584,24 @@ void MainWindow::connectSignals()
     connect(m_searchBox, &QLineEdit::textChanged,
             this, &MainWindow::onSearchTextChanged);
 
-    // ── 右键菜单（格式转换） ──
+    // ── 右键菜单（格式转换 + 添加到歌单） ──
     m_listWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_listWidget, &QWidget::customContextMenuRequested,
             this, &MainWindow::onShowConversionMenu);
+
+    // ── 歌单选择器 ──
+    connect(m_playlistList, &QListWidget::currentRowChanged,
+            this, &MainWindow::onPlaylistSelectorSelected);
+
+    // 新建 / 删除歌单
+    connect(m_btnNewPlaylist, &QPushButton::clicked,
+            this, &MainWindow::onNewPlaylist);
+    connect(m_btnDeletePlaylist, &QPushButton::clicked,
+            this, &MainWindow::onDeletePlaylist);
+
+    // PlaylistManager 变化 → 刷新歌单选择器
+    connect(m_playlistManager, &PlaylistManager::playlistsChanged,
+            this, &MainWindow::rebuildPlaylistSelector);
 
     // 控制按钮
     connect(m_btnPlaylist,   &QPushButton::clicked, this, &MainWindow::onTogglePlaylist);
@@ -606,19 +663,33 @@ void MainWindow::connectSignals()
     });
 
     // ── 元数据信号 ──
+    // 缓存中 artist/album 优先（来自扫描时 ffprobe 或 JSON 恢复），
+    // QMediaPlayer 仅在缓存空缺时补充，并同步刷新显示
     connect(m_player, &Player::artistChanged, this, [this](const QString &artist) {
-        m_songArtist->setText(artist.isEmpty()
-            ? QStringLiteral("未知艺术家") : artist);
-        // 回写到 Song 对象，确保关闭时持久化正确的艺术家
         if (m_playlist->hasCurrent() && !artist.isEmpty()) {
             Song &song = m_playlist->currentSongRef();
-            song.artist = artist;
+            if (song.artist.isEmpty()) {
+                song.artist = artist;
+                updateArtistAlbumDisplay();   // 填充后刷新显示
+            }
+        }
+    });
+    connect(m_player, &Player::albumChanged, this, [this](const QString &album) {
+        if (m_playlist->hasCurrent() && !album.isEmpty()) {
+            Song &song = m_playlist->currentSongRef();
+            if (song.album.isEmpty()) {
+                song.album = album;
+                updateArtistAlbumDisplay();   // 填充后刷新显示
+            }
         }
     });
     connect(m_player, &Player::coverArtChanged, this, [this](const QPixmap &cover) {
         if (!cover.isNull()) {
             m_coverCache = cover;
             updateCoverDisplay();
+            // 同步更新控制栏小唱片
+            QPixmap disc = m_coverCache.scaled(36, 36, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            m_albumDisc->setPixmap(disc);
         }
     });
 }
@@ -672,19 +743,14 @@ void MainWindow::playCurrentSong()
     if (!song.isValid()) return;
 
     m_songTitle->setText(song.displayTitle());
-    m_songArtist->setText(song.displayArtist());
+    updateArtistAlbumDisplay();
 
-    // 优先加载本地封面文件（文件夹中的 cover.jpg 等）
-    if (song.hasCoverFile()) {
+    // 加载封面（优先本地文件，播放后会被 Player 内嵌封面替换）
+    if (song.hasCoverFile())
         m_coverCache = song.loadCoverFile();
-        if (!m_coverCache.isNull())
-            updateCoverDisplay();
-        else
-            m_albumArt->setText(QStringLiteral("🎵"));
-    } else {
+    else
         m_coverCache = QPixmap();
-        m_albumArt->setText(QStringLiteral("🎵"));
-    }
+    updateCoverDisplay();
 
     // 更新控制栏唱片和歌名
     {
@@ -738,15 +804,67 @@ void MainWindow::playCurrentSong()
 
     m_player->setSource(song.url());
     m_player->play();
+
+    // ── 媒体加载后直接读取 QMediaPlayer 元数据（比 metaDataChanged 信号更可靠） ──
+    // 使用单次连接，避免反复触发
+    auto *metaConn = new QMetaObject::Connection;
+    *metaConn = connect(m_player, &Player::mediaLoaded, this,
+        [this, metaConn]() {
+            disconnect(*metaConn);
+            delete metaConn;
+
+            if (!m_playlist->hasCurrent())
+                return;
+
+            Song &s = m_playlist->currentSongRef();
+            bool changed = false;
+
+            const QString plArtist = m_player->currentArtist();
+            if (s.artist.isEmpty() && !plArtist.isEmpty()) {
+                s.artist = plArtist;
+                changed = true;
+            }
+
+            const QString plAlbum = m_player->currentAlbum();
+            if (s.album.isEmpty() && !plAlbum.isEmpty()) {
+                s.album = plAlbum;
+                changed = true;
+            }
+
+            if (changed)
+                updateArtistAlbumDisplay();
+        });
 }
 
 void MainWindow::onSongSelected(int index)
 {
-    if (index < 0 || index >= m_playlist->count())
+    // 从 QListWidget item 获取文件路径，再查找 Playlist 中的实际索引
+    if (index < 0 || index >= m_listWidget->count())
+        return;
+
+    auto *item = m_listWidget->item(index);
+    if (!item)
+        return;
+
+    const QString filePath = item->data(Qt::UserRole).toString();
+    if (filePath.isEmpty())
+        return;
+
+    // 在 Playlist 中查找实际索引
+    const QList<Song> &allSongs = m_playlist->allSongs();
+    int actualIndex = -1;
+    for (int i = 0; i < allSongs.size(); ++i) {
+        if (allSongs[i].filePath == filePath) {
+            actualIndex = i;
+            break;
+        }
+    }
+
+    if (actualIndex < 0)
         return;
 
     m_manualTrackChange = true;
-    m_playlist->setCurrentIndex(index);
+    m_playlist->setCurrentIndex(actualIndex);
     playCurrentSong();
 }
 
@@ -883,22 +1001,35 @@ void MainWindow::onFolderLoaded(const QList<Song> &songs)
     statusBar()->showMessage(QStringLiteral("已加载 %1 首歌曲").arg(songs.size()), 3000);
     m_library->saveLastFolder(m_playTrack->currentFolder());
 
+    // 重置视图到"所有歌曲"并刷新歌单选择器（分类列表更新）
+    m_listMode = ListMode::AllSongs;
+    m_currentFilterName.clear();
+    rebuildPlaylistSelector();
+
     if (songs.size() > 0)
         m_listWidget->setCurrentRow(0);
 }
 
 void MainWindow::onPlaylistCurrentChanged(int index)
 {
-    if (index >= 0 && index < m_listWidget->count()) {
-        m_listWidget->blockSignals(true);
-        m_listWidget->setCurrentRow(index);
-        m_listWidget->blockSignals(false);
+    // 在 m_listWidget 中查找当前播放歌曲的高亮行（通过文件路径匹配）
+    if (m_playlist->hasCurrent() && index >= 0 && index < m_playlist->count()) {
+        const QString currentPath = m_playlist->songAt(index).filePath;
+        for (int i = 0; i < m_listWidget->count(); ++i) {
+            auto *item = m_listWidget->item(i);
+            if (item && item->data(Qt::UserRole).toString() == currentPath) {
+                m_listWidget->blockSignals(true);
+                m_listWidget->setCurrentRow(i);
+                m_listWidget->blockSignals(false);
+                break;
+            }
+        }
     }
 
     if (m_playlist->hasCurrent()) {
         const Song &song = m_playlist->currentSong();
         m_songTitle->setText(song.displayTitle());
-        m_songArtist->setText(song.displayArtist());
+        updateArtistAlbumDisplay();   // 包含专辑信息，不覆盖
     }
 }
 
@@ -974,6 +1105,10 @@ void MainWindow::restorePlaylistFromLibrary()
 /// 拖拽排序后，将 QListWidget 中的显示顺序同步回 Playlist
 void MainWindow::syncPlaylistFromUI()
 {
+    // 仅在"所有歌曲"模式下允许拖拽排序
+    if (m_listMode != ListMode::AllSongs)
+        return;
+
     // 从 QListWidget item 中读取歌曲路径
     QStringList orderedPaths;
     for (int i = 0; i < m_listWidget->count(); ++i) {
@@ -1258,6 +1393,25 @@ void MainWindow::onLyricsRevertTimeout()
 }
 
 // ════════════════════════════════════════════════════════════
+//  元数据显示
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::updateArtistAlbumDisplay()
+{
+    if (!m_playlist->hasCurrent())
+        return;
+
+    const Song &song = m_playlist->currentSong();
+    const QString artist = song.displayArtist();
+    const QString album  = song.album;
+
+    if (!album.isEmpty())
+        m_songArtist->setText(artist + QStringLiteral("  ·  ") + album);
+    else
+        m_songArtist->setText(artist);
+}
+
+// ════════════════════════════════════════════════════════════
 //  格式转换（右键菜单）
 // ════════════════════════════════════════════════════════════
 
@@ -1279,9 +1433,34 @@ void MainWindow::onShowConversionMenu(const QPoint &pos)
     QAction *actConvert = menu.addAction(QStringLiteral("格式转换"));
     actConvert->setIcon(qApp->style()->standardIcon(QStyle::SP_FileDialogDetailedView));
 
+    menu.addSeparator();
+
+    // 添加到歌单子菜单
+    QMenu *addToMenu = menu.addMenu(QStringLiteral("添加到歌单"));
+    const QStringList playlistNames = m_playlistManager->playlistNames();
+    if (playlistNames.isEmpty()) {
+        addToMenu->addAction(QStringLiteral("（暂无歌单）"))->setEnabled(false);
+    } else {
+        for (const auto &plName : playlistNames) {
+            QAction *act = addToMenu->addAction(plName);
+            if (m_playlistManager->hasSong(plName, filePath)) {
+                act->setEnabled(false);
+                act->setText(plName + QStringLiteral(" ✓"));
+            }
+        }
+    }
+
     QAction *selected = menu.exec(m_listWidget->viewport()->mapToGlobal(pos));
     if (selected == actConvert) {
         onConvertSong(filePath, title);
+    } else if (selected && selected->parent() == addToMenu && selected->isEnabled()) {
+        QString targetName = selected->text();
+        if (targetName.endsWith(QStringLiteral(" ✓")))
+            targetName.chop(2);
+        if (m_playlistManager->addSong(targetName, filePath)) {
+            statusBar()->showMessage(
+                QStringLiteral("已添加到歌单「%1」").arg(targetName), 3000);
+        }
     }
 }
 
@@ -1443,4 +1622,412 @@ void MainWindow::applyBackgrounds(const QString &folderPath)
     // 合并样式：主题基础 + 自定义背景规则
     QString fullSheet = baseSheet + QStringLiteral("\n") + bgRules.join(QStringLiteral("\n"));
     qApp->setStyleSheet(fullSheet);
+}
+
+// ════════════════════════════════════════════════════════════
+//  歌单管理
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::rebuildPlaylistSelector()
+{
+    m_playlistList->blockSignals(true);
+    m_playlistList->clear();
+
+    // 1. "所有歌曲"（固定首项）
+    auto *allItem = new QListWidgetItem(QStringLiteral("🎵 所有歌曲"));
+    allItem->setData(Qt::UserRole, QStringLiteral("__all__"));
+    allItem->setData(Qt::UserRole + 1, QStringLiteral("all"));
+    allItem->setFlags(allItem->flags() & ~Qt::ItemIsDropEnabled);
+    m_playlistList->addItem(allItem);
+
+    // 2. 用户歌单
+    const QStringList names = m_playlistManager->playlistNames();
+    if (!names.isEmpty()) {
+        // 分隔标题（不可选）
+        auto *sep1 = new QListWidgetItem(QStringLiteral("── 我的歌单 ──"));
+        sep1->setFlags(sep1->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsEnabled));
+        sep1->setData(Qt::UserRole, QStringLiteral("__separator__"));
+        m_playlistList->addItem(sep1);
+
+        for (const auto &name : names) {
+            auto *plItem = new QListWidgetItem(QStringLiteral("📁 ") + name);
+            plItem->setData(Qt::UserRole, name);
+            plItem->setData(Qt::UserRole + 1, QStringLiteral("playlist"));
+            m_playlistList->addItem(plItem);
+        }
+    }
+
+    // 3. 分类浏览
+    auto *sep2 = new QListWidgetItem(QStringLiteral("── 分类浏览 ──"));
+    sep2->setFlags(sep2->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsEnabled));
+    sep2->setData(Qt::UserRole, QStringLiteral("__separator__"));
+    m_playlistList->addItem(sep2);
+
+    auto *artistItem = new QListWidgetItem(QStringLiteral("👤 按歌手"));
+    artistItem->setData(Qt::UserRole, QStringLiteral("__artist__"));
+    artistItem->setData(Qt::UserRole + 1, QStringLiteral("category"));
+    m_playlistList->addItem(artistItem);
+
+    auto *albumItem = new QListWidgetItem(QStringLiteral("💿 按专辑"));
+    albumItem->setData(Qt::UserRole, QStringLiteral("__album__"));
+    albumItem->setData(Qt::UserRole + 1, QStringLiteral("category"));
+    m_playlistList->addItem(albumItem);
+
+    // 恢复选中项
+    restorePlaylistSelectorSelection();
+
+    m_playlistList->blockSignals(false);
+}
+
+void MainWindow::restorePlaylistSelectorSelection()
+{
+    // 根据当前状态恢复选中项
+    for (int i = 0; i < m_playlistList->count(); ++i) {
+        auto *item = m_playlistList->item(i);
+        if (!item || !(item->flags() & Qt::ItemIsSelectable))
+            continue;
+
+        const QString type = item->data(Qt::UserRole + 1).toString();
+        const QString val  = item->data(Qt::UserRole).toString();
+
+        if (m_listMode == ListMode::AllSongs && type == QStringLiteral("all")) {
+            m_playlistList->setCurrentRow(i);
+            return;
+        }
+        if (m_listMode == ListMode::UserPlaylist && type == QStringLiteral("playlist") && val == m_currentFilterName) {
+            m_playlistList->setCurrentRow(i);
+            return;
+        }
+        if (m_listMode == ListMode::ByArtist && type == QStringLiteral("category") && val == QStringLiteral("__artist__")) {
+            m_playlistList->setCurrentRow(i);
+            return;
+        }
+        if (m_listMode == ListMode::ByAlbum && type == QStringLiteral("category") && val == QStringLiteral("__album__")) {
+            m_playlistList->setCurrentRow(i);
+            return;
+        }
+    }
+}
+
+void MainWindow::onPlaylistSelectorSelected(int index)
+{
+    if (index < 0 || index >= m_playlistList->count())
+        return;
+
+    auto *item = m_playlistList->item(index);
+    if (!item || !(item->flags() & Qt::ItemIsSelectable))
+        return;
+
+    const QString type = item->data(Qt::UserRole + 1).toString();
+    const QString val  = item->data(Qt::UserRole).toString();
+
+    if (type == QStringLiteral("all")) {
+        // 所有歌曲
+        m_listMode = ListMode::AllSongs;
+        m_currentFilterName.clear();
+        rebuildSongList();
+    } else if (type == QStringLiteral("playlist")) {
+        // 用户歌单
+        m_listMode = ListMode::UserPlaylist;
+        m_currentFilterName = val;
+        rebuildSongList();
+    } else if (type == QStringLiteral("category")) {
+        if (val == QStringLiteral("__artist__")) {
+            // 按歌手：显示歌手列表
+            m_listMode = ListMode::ByArtist;
+            m_currentFilterName.clear();
+            showCategoryList(true);
+        } else if (val == QStringLiteral("__album__")) {
+            // 按专辑：显示专辑列表
+            m_listMode = ListMode::ByAlbum;
+            m_currentFilterName.clear();
+            showCategoryList(false);
+        }
+    }
+}
+
+void MainWindow::showCategoryList(bool isArtist)
+{
+    m_listWidget->blockSignals(true);
+    m_listWidget->clear();
+    m_listWidget->setDragDropMode(QAbstractItemView::NoDragDrop);
+
+    const QList<Song> &allSongs = m_playlist->allSongs();
+    QStringList categories;
+    if (isArtist)
+        categories = m_playlistManager->artistsFromSongs(allSongs);
+    else
+        categories = m_playlistManager->albumsFromSongs(allSongs);
+
+    // 添加返回项
+    auto *backItem = new QListWidgetItem(QStringLiteral("← 返回全部歌曲"));
+    backItem->setData(Qt::UserRole, QStringLiteral("__back__"));
+    backItem->setData(Qt::UserRole + 1, QStringLiteral("back"));
+    m_listWidget->addItem(backItem);
+
+    // 添加分类项
+    for (const auto &cat : categories) {
+        QString prefix = isArtist ? QStringLiteral("👤 ") : QStringLiteral("💿 ");
+        auto *catItem = new QListWidgetItem(prefix + cat);
+        catItem->setData(Qt::UserRole, cat);
+        catItem->setData(Qt::UserRole + 1, isArtist ? QStringLiteral("artist") : QStringLiteral("album"));
+        m_listWidget->addItem(catItem);
+    }
+
+    m_listCountLabel->setText(QStringLiteral("共 %1 个分类").arg(categories.size()));
+    m_listWidget->blockSignals(false);
+}
+
+void MainWindow::onSongListItemClicked(int index)
+{
+    if (index < 0)
+        return;
+
+    auto *item = m_listWidget->item(index);
+    if (!item)
+        return;
+
+    // 分类模式处理
+    if (m_listMode == ListMode::ByArtist || m_listMode == ListMode::ByAlbum) {
+        const QString subType = item->data(Qt::UserRole + 1).toString();
+        const QString val = item->data(Qt::UserRole).toString();
+
+        if (subType == QStringLiteral("back")) {
+            // 返回全部歌曲
+            m_listMode = ListMode::AllSongs;
+            m_currentFilterName.clear();
+            rebuildPlaylistSelector();
+            rebuildSongList();
+            return;
+        }
+
+        if (subType == QStringLiteral("artist")) {
+            m_listMode = ListMode::ArtistSongs;
+            m_currentFilterName = val;
+            rebuildSongList();
+            return;
+        }
+
+        if (subType == QStringLiteral("album")) {
+            m_listMode = ListMode::AlbumSongs;
+            m_currentFilterName = val;
+            rebuildSongList();
+            return;
+        }
+        return;
+    }
+
+    // 艺术家/专辑歌曲列表模式：与普通模式相同，调用 onSongSelected
+    if (m_listMode == ListMode::ArtistSongs || m_listMode == ListMode::AlbumSongs) {
+        onSongSelected(index);
+        return;
+    }
+
+    // 普通模式（AllSongs / UserPlaylist）
+    onSongSelected(index);
+}
+
+void MainWindow::rebuildSongList()
+{
+    m_listWidget->blockSignals(true);
+    m_listWidget->clear();
+
+    // 仅在"所有歌曲"模式下启用拖拽排序
+    if (m_listMode == ListMode::AllSongs)
+        m_listWidget->setDragDropMode(QAbstractItemView::InternalMove);
+    else
+        m_listWidget->setDragDropMode(QAbstractItemView::NoDragDrop);
+
+    const QList<Song> &allSongs = m_playlist->allSongs();
+
+    QList<Song> displaySongs;
+
+    if (m_listMode == ListMode::AllSongs) {
+        displaySongs = allSongs;
+    } else if (m_listMode == ListMode::UserPlaylist) {
+        displaySongs = m_playlistManager->resolveSongs(m_currentFilterName, allSongs);
+    } else if (m_listMode == ListMode::ArtistSongs) {
+        const QList<int> indices = m_playlistManager->songIndicesByArtist(m_currentFilterName, allSongs);
+        for (int idx : indices) {
+            if (idx >= 0 && idx < allSongs.size())
+                displaySongs.append(allSongs[idx]);
+        }
+    } else if (m_listMode == ListMode::AlbumSongs) {
+        const QList<int> indices = m_playlistManager->songIndicesByAlbum(m_currentFilterName, allSongs);
+        for (int idx : indices) {
+            if (idx >= 0 && idx < allSongs.size())
+                displaySongs.append(allSongs[idx]);
+        }
+    }
+
+    // 填充列表
+    for (const auto &song : displaySongs) {
+        auto *item = new QListWidgetItem(song.displayTitle());
+        item->setData(Qt::UserRole, song.filePath);
+        m_listWidget->addItem(item);
+    }
+
+    // 同步 Playlist（仅 AllSongs 模式使用完整列表，其他模式用筛选后的）
+    // 保存当前播放歌曲引用
+    const QString currentPath = m_playlist->hasCurrent()
+        ? m_playlist->currentSong().filePath : QString();
+
+    if (m_listMode == ListMode::AllSongs) {
+        // 非 AllSongs 模式下不修改 Playlist，仅修改显示
+        // AllSongs 模式下直接使用 m_playlist 已有的内容
+        int newIndex = -1;
+        for (int i = 0; i < m_listWidget->count(); ++i) {
+            if (m_listWidget->item(i)->data(Qt::UserRole).toString() == currentPath) {
+                newIndex = i;
+                break;
+            }
+        }
+        if (newIndex >= 0) {
+            m_listWidget->setCurrentRow(newIndex);
+        } else if (m_listWidget->count() > 0 && m_playlist->hasCurrent()) {
+            m_listWidget->setCurrentRow(0);
+        }
+    } else {
+        // 筛选模式：尝试恢复当前播放歌曲的高亮
+        int newIndex = -1;
+        for (int i = 0; i < m_listWidget->count(); ++i) {
+            if (m_listWidget->item(i)->data(Qt::UserRole).toString() == currentPath) {
+                newIndex = i;
+                break;
+            }
+        }
+        if (newIndex >= 0) {
+            m_listWidget->setCurrentRow(newIndex);
+        }
+    }
+
+    // 更新计数
+    const int total = m_playlist->count();
+    const int shown = m_listWidget->count();
+    if (shown == total)
+        m_listCountLabel->setText(QStringLiteral("共 %1 首").arg(total));
+    else
+        m_listCountLabel->setText(QStringLiteral("显示 %1 / %2 首").arg(shown).arg(total));
+
+    m_listWidget->blockSignals(false);
+}
+
+void MainWindow::onNewPlaylist()
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(
+        this,
+        QStringLiteral("新建歌单"),
+        QStringLiteral("请输入歌单名称："),
+        QLineEdit::Normal,
+        QString(),
+        &ok);
+
+    if (!ok || name.trimmed().isEmpty())
+        return;
+
+    if (m_playlistManager->createPlaylist(name.trimmed())) {
+        statusBar()->showMessage(QStringLiteral("歌单「%1」已创建").arg(name.trimmed()), 3000);
+        // 自动选中新建的歌单
+        rebuildPlaylistSelector();
+        for (int i = 0; i < m_playlistList->count(); ++i) {
+            auto *item = m_playlistList->item(i);
+            if (item && item->data(Qt::UserRole).toString() == name.trimmed()) {
+                m_playlistList->setCurrentRow(i);
+                break;
+            }
+        }
+    } else {
+        statusBar()->showMessage(QStringLiteral("歌单「%1」已存在，请使用其他名称").arg(name.trimmed()), 3000);
+    }
+}
+
+void MainWindow::onDeletePlaylist()
+{
+    // 获取当前选中的歌单
+    int row = m_playlistList->currentRow();
+    if (row < 0) {
+        statusBar()->showMessage(QStringLiteral("请先在歌单列表中选择要删除的歌单"), 3000);
+        return;
+    }
+
+    auto *item = m_playlistList->item(row);
+    if (!item)
+        return;
+
+    const QString type = item->data(Qt::UserRole + 1).toString();
+    if (type != QStringLiteral("playlist")) {
+        statusBar()->showMessage(QStringLiteral("请选择一个用户歌单进行删除"), 3000);
+        return;
+    }
+
+    const QString name = item->data(Qt::UserRole).toString();
+
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        QStringLiteral("删除歌单"),
+        QStringLiteral("确定要删除歌单「%1」吗？\n此操作不可撤销。").arg(name),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        m_playlistManager->deletePlaylist(name);
+        statusBar()->showMessage(QStringLiteral("歌单「%1」已删除").arg(name), 3000);
+        // 切换到"所有歌曲"视图
+        m_listMode = ListMode::AllSongs;
+        m_currentFilterName.clear();
+        rebuildSongList();
+    }
+}
+
+void MainWindow::onAddToPlaylistMenu(const QString &songPath)
+{
+    const QStringList names = m_playlistManager->playlistNames();
+    if (names.isEmpty()) {
+        QMessageBox::information(this,
+            QStringLiteral("添加到歌单"),
+            QStringLiteral("暂无歌单，请先创建歌单。"));
+        return;
+    }
+
+    // 显示选择菜单
+    QMenu menu(this);
+    menu.setTitle(QStringLiteral("添加到歌单"));
+
+    QAction *selected = nullptr;
+    for (const auto &name : names) {
+        QAction *act = menu.addAction(name);
+        if (m_playlistManager->hasSong(name, songPath)) {
+            act->setEnabled(false);
+            act->setText(name + QStringLiteral(" ✓"));
+        }
+        if (!selected)
+            selected = act;
+    }
+
+    QAction *result = menu.exec(QCursor::pos());
+    if (result && result->isEnabled()) {
+        const QString targetName = result->text();
+        // 去掉可能的 ✓ 标记
+        QString cleanName = targetName;
+        if (cleanName.endsWith(QStringLiteral(" ✓")))
+            cleanName.chop(2);
+
+        if (m_playlistManager->addSong(cleanName, songPath)) {
+            statusBar()->showMessage(
+                QStringLiteral("已添加到歌单「%1」").arg(cleanName), 3000);
+        }
+    }
+}
+
+void MainWindow::savePlaylistData()
+{
+    m_library->savePlaylists(m_playlistManager->toJson());
+}
+
+void MainWindow::restorePlaylistData()
+{
+    const QJsonArray data = m_library->loadPlaylists();
+    m_playlistManager->fromJson(data);
+    rebuildPlaylistSelector();
 }

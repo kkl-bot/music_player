@@ -57,6 +57,45 @@ QString Style::darkStyleSheet()
             background: #151515;
             border-right: 1px solid #333;
         }
+        #playlistList {
+            background: #1a1a1a;
+            border: none;
+            border-bottom: 1px solid #333;
+            outline: none;
+            font-size: 13px;
+            min-height: 100px;
+            max-height: 180px;
+        }
+        #playlistList::item {
+            padding: 6px 12px;
+            border-radius: 4px;
+            margin: 1px 4px;
+            color: #cccccc;
+        }
+        #playlistList::item:hover {
+            background: #2a2a2a;
+            color: #ffffff;
+        }
+        #playlistList::item:selected {
+            background: #3a2020;
+            color: #ff5252;
+        }
+        #playlistBtn {
+            background: #242424;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #cccccc;
+        }
+        #playlistBtn:hover {
+            background: #333;
+            color: #ffffff;
+            border-color: #e53935;
+        }
+        #playlistBtn:pressed {
+            background: #444;
+        }
         #searchBox {
             background: #222;
             border: 1px solid #444;
@@ -487,6 +526,45 @@ QString Style::lightStyleSheet()
             background: #ffffff;
             border-right: 1px solid #ddd;
         }
+        #playlistList {
+            background: #fafafa;
+            border: none;
+            border-bottom: 1px solid #ddd;
+            outline: none;
+            font-size: 13px;
+            min-height: 100px;
+            max-height: 180px;
+        }
+        #playlistList::item {
+            padding: 6px 12px;
+            border-radius: 4px;
+            margin: 1px 4px;
+            color: #555;
+        }
+        #playlistList::item:hover {
+            background: #e8e8e8;
+            color: #333;
+        }
+        #playlistList::item:selected {
+            background: #fce4e4;
+            color: #e53935;
+        }
+        #playlistBtn {
+            background: #e0e0e0;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #555;
+        }
+        #playlistBtn:hover {
+            background: #cccccc;
+            color: #333;
+            border-color: #e53935;
+        }
+        #playlistBtn:pressed {
+            background: #bbbbbb;
+        }
         #searchBox {
             background: #e8e8e8;
             border: 1px solid #ccc;
@@ -908,6 +986,45 @@ QString Style::fleetSnowfluffStyleSheet()
         #leftPanel {
             background: rgba(18,20,40,0.75);
             border-right: 1px solid rgba(160,196,255,0.2);
+        }
+        #playlistList {
+            background: rgba(18,20,40,0.65);
+            border: none;
+            border-bottom: 1px solid rgba(160,196,255,0.15);
+            outline: none;
+            font-size: 13px;
+            min-height: 100px;
+            max-height: 180px;
+        }
+        #playlistList::item {
+            padding: 6px 12px;
+            border-radius: 4px;
+            margin: 1px 4px;
+            color: rgba(224,230,255,0.6);
+        }
+        #playlistList::item:hover {
+            background: rgba(255,183,197,0.08);
+            color: #e0e6ff;
+        }
+        #playlistList::item:selected {
+            background: rgba(255,183,197,0.15);
+            color: #ffb7c5;
+        }
+        #playlistBtn {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(160,196,255,0.2);
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: rgba(224,230,255,0.6);
+        }
+        #playlistBtn:hover {
+            background: rgba(255,255,255,0.12);
+            color: #e0e6ff;
+            border-color: #a0c4ff;
+        }
+        #playlistBtn:pressed {
+            background: rgba(255,255,255,0.18);
         }
         #searchBox {
             background: rgba(255,255,255,0.06);

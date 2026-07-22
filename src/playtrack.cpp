@@ -1,5 +1,5 @@
 #include "playtrack.h"
-#include "formatconverter.h"
+#include "library.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -19,12 +19,6 @@ static const QStringList kAudioSuffixes {
 };
 
 // ════════════════════════════════════════════════════════════
-//  静态成员定义
-// ════════════════════════════════════════════════════════════
-
-QMap<QString, QList<Song>> PlayTrack::s_cache;
-
-// ════════════════════════════════════════════════════════════
 //  构造 / 析构
 // ════════════════════════════════════════════════════════════
 
@@ -35,13 +29,17 @@ PlayTrack::PlayTrack(QObject *parent)
 
 PlayTrack::~PlayTrack() = default;
 
+void PlayTrack::setLibrary(Library *library)
+{
+    m_library = library;
+}
+
 // ════════════════════════════════════════════════════════════
 //  文件夹浏览与加载
 // ════════════════════════════════════════════════════════════
 
 bool PlayTrack::browseAndLoad()
 {
-    // 弹出系统文件夹选择对话框
     const QString dir = QFileDialog::getExistingDirectory(
         nullptr,
         QStringLiteral("选择音乐文件夹"),
@@ -49,7 +47,7 @@ bool PlayTrack::browseAndLoad()
         QFileDialog::ShowDirsOnly | QFileDialog::ReadOnly);
 
     if (dir.isEmpty())
-        return false;   // 用户取消了选择
+        return false;
 
     return loadFromFolder(dir);
 }
@@ -62,17 +60,18 @@ bool PlayTrack::loadFromFolder(const QString &dirPath)
         return false;
     }
 
-    // ── 命中缓存，直接返回 ──
-    if (s_cache.contains(canonical)) {
-        m_currentFolder = canonical;
-        m_songs         = s_cache.value(canonical);
-
-        emit folderChanged(canonical);
-        emit songsLoaded(m_songs);
-        return true;
+    // ── 优先使用 Library 缓存 ──
+    if (m_library && m_library->hasFolderCache(canonical)) {
+        m_songs = m_library->loadCachedFolderSongs(canonical);
+        if (!m_songs.isEmpty()) {
+            m_currentFolder = canonical;
+            emit folderChanged(canonical);
+            emit songsLoaded(m_songs);
+            return true;
+        }
     }
 
-    // ── 扫描文件夹 ──
+    // ── 缓存未命中，扫描文件夹 ──
     const QList<Song> songs = scanFolder(canonical);
 
     if (songs.isEmpty()) {
@@ -80,8 +79,9 @@ bool PlayTrack::loadFromFolder(const QString &dirPath)
         return false;
     }
 
-    // ── 写入缓存 ──
-    s_cache.insert(canonical, songs);
+    // ── 写入 Library 缓存 ──
+    if (m_library)
+        m_library->cacheFolderSongs(canonical, songs);
 
     m_currentFolder = canonical;
     m_songs         = songs;
@@ -116,18 +116,21 @@ QString PlayTrack::currentFolder() const
 }
 
 // ════════════════════════════════════════════════════════════
-//  缓存管理
+//  缓存管理（委托给 Library）
 // ════════════════════════════════════════════════════════════
 
 void PlayTrack::clearCache()
 {
-    s_cache.clear();
+    if (m_library)
+        m_library->clearFolderCache();
 }
 
 void PlayTrack::clearCacheForFolder(const QString &dirPath)
 {
-    const QString canonical = QDir(dirPath).canonicalPath();
-    s_cache.remove(canonical);
+    if (m_library) {
+        const QString canonical = QDir(dirPath).canonicalPath();
+        m_library->clearFolderCacheFor(canonical);
+    }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -147,9 +150,10 @@ QList<Song> PlayTrack::scanFolder(const QString &dirPath)
         if (!isSupportedAudio(suffix))
             continue;
 
-        Song song(fi.absoluteFilePath());
-        song.title  = extractTitle(song.filePath);
-        song.artist = FormatConverter::probeArtist(song.filePath);
+        Song song(fi.absoluteFilePath());   // 构造函数已自动探测 artist/album/title
+        // 如果 probeAll 未读到标题，用文件名规则降级
+        if (song.title.isEmpty() || song.title == fi.completeBaseName())
+            song.title = extractTitle(fi.absoluteFilePath());
         result.append(song);
     }
 

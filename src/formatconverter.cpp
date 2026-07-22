@@ -3,6 +3,9 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QRegularExpression>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <QDebug>
 #include <QCoreApplication>
 
@@ -243,6 +246,116 @@ QString FormatConverter::probeArtist(const QString &filePath)
 
     const QString output = QString::fromUtf8(probe.readAllStandardOutput()).trimmed();
     return output;
+}
+
+QString FormatConverter::probeAlbum(const QString &filePath)
+{
+    QProcess probe;
+    probe.start(ffprobePath(), {
+        QStringLiteral("-v"), QStringLiteral("quiet"),
+        QStringLiteral("-show_entries"), QStringLiteral("format_tags=album"),
+        QStringLiteral("-of"), QStringLiteral("default=noprint_wrappers=1:nokey=1"),
+        filePath
+    });
+
+    if (!probe.waitForFinished(10000))
+        return {};
+
+    const QString output = QString::fromUtf8(probe.readAllStandardOutput()).trimmed();
+    return output;
+}
+
+QString FormatConverter::probeTitle(const QString &filePath)
+{
+    QProcess probe;
+    probe.start(ffprobePath(), {
+        QStringLiteral("-v"), QStringLiteral("quiet"),
+        QStringLiteral("-show_entries"), QStringLiteral("format_tags=title"),
+        QStringLiteral("-of"), QStringLiteral("default=noprint_wrappers=1:nokey=1"),
+        filePath
+    });
+
+    if (!probe.waitForFinished(10000))
+        return {};
+
+    const QString output = QString::fromUtf8(probe.readAllStandardOutput()).trimmed();
+    return output;
+}
+
+FormatConverter::ProbeResult FormatConverter::probeAll(const QString &filePath)
+{
+    ProbeResult result;
+
+    // ffprobe 不存在时直接返回空（由 Player 信号回填）
+    if (!QFileInfo::exists(ffprobePath()))
+        return result;
+
+    // 使用 JSON 输出同时探测 format 和 stream 级别的标签
+    QProcess probe;
+    probe.start(ffprobePath(), {
+        QStringLiteral("-v"), QStringLiteral("quiet"),
+        QStringLiteral("-show_format"),
+        QStringLiteral("-show_streams"),
+        QStringLiteral("-of"), QStringLiteral("json"),
+        filePath
+    });
+
+    if (!probe.waitForFinished(15000))
+        return result;
+
+    const QByteArray raw = probe.readAllStandardOutput();
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (!doc.isObject())
+        return result;
+
+    const QJsonObject root = doc.object();
+
+    // ── 辅助：从 tags 对象中读取字段 ──
+    auto readTag = [](const QJsonObject &tags, const QString &key) -> QString {
+        return tags.value(key).toString().trimmed();
+    };
+
+    // ── 从 format 读取容器级标签 ──
+    const QJsonObject format = root.value(QStringLiteral("format")).toObject();
+    const QJsonObject formatTags = format.value(QStringLiteral("tags")).toObject();
+
+    // ── 从第一个音频流读取流级标签（优先） ──
+    const QJsonArray streams = root.value(QStringLiteral("streams")).toArray();
+    QJsonObject streamTags;
+    for (const auto &sv : streams) {
+        const QJsonObject s = sv.toObject();
+        if (s.value(QStringLiteral("codec_type")).toString() == QStringLiteral("audio")) {
+            streamTags = s.value(QStringLiteral("tags")).toObject();
+            break;
+        }
+    }
+
+    // 优先使用 stream 标签，回退到 format 标签
+    result.artist = readTag(streamTags, QStringLiteral("artist"));
+    if (result.artist.isEmpty())
+        result.artist = readTag(streamTags, QStringLiteral("TPE1"));        // ID3v2
+    if (result.artist.isEmpty())
+        result.artist = readTag(streamTags, QStringLiteral("\251ART"));     // MP4
+    if (result.artist.isEmpty())
+        result.artist = readTag(formatTags, QStringLiteral("artist"));
+
+    result.album = readTag(streamTags, QStringLiteral("album"));
+    if (result.album.isEmpty())
+        result.album = readTag(streamTags, QStringLiteral("TALB"));        // ID3v2
+    if (result.album.isEmpty())
+        result.album = readTag(streamTags, QStringLiteral("\251alb"));     // MP4
+    if (result.album.isEmpty())
+        result.album = readTag(formatTags, QStringLiteral("album"));
+
+    result.title = readTag(streamTags, QStringLiteral("title"));
+    if (result.title.isEmpty())
+        result.title = readTag(streamTags, QStringLiteral("TIT2"));        // ID3v2
+    if (result.title.isEmpty())
+        result.title = readTag(streamTags, QStringLiteral("\251nam"));     // MP4
+    if (result.title.isEmpty())
+        result.title = readTag(formatTags, QStringLiteral("title"));
+
+    return result;
 }
 
 QString FormatConverter::ffmpegPath()

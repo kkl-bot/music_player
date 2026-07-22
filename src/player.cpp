@@ -164,10 +164,18 @@ QString Player::errorString() const
 
 QString Player::currentArtist() const
 {
-    const QString artist = m_mediaPlayer->metaData().value(QMediaMetaData::Author).toString();
+    // 依次尝试多个可能的 Key（不同后端/格式存储位置不同）
+    QString artist = m_mediaPlayer->metaData().value(QMediaMetaData::ContributingArtist).toString();
     if (artist.isEmpty())
-        return m_mediaPlayer->metaData().value(QMediaMetaData::AlbumArtist).toString();
+        artist = m_mediaPlayer->metaData().value(QMediaMetaData::Author).toString();
+    if (artist.isEmpty())
+        artist = m_mediaPlayer->metaData().value(QMediaMetaData::AlbumArtist).toString();
     return artist;
+}
+
+QString Player::currentAlbum() const
+{
+    return m_mediaPlayer->metaData().value(QMediaMetaData::AlbumTitle).toString();
 }
 
 QString Player::currentTitle() const
@@ -210,6 +218,8 @@ void Player::onMediaStatusChanged(QMediaPlayer::MediaStatus status)
     switch (status) {
     case QMediaPlayer::LoadedMedia:
         emit durationChanged(m_mediaPlayer->duration());
+        // 媒体加载后立即读取元数据（metaDataChanged 信号可能不触发）
+        readMetaData();
         emit mediaLoaded();
         break;
     case QMediaPlayer::InvalidMedia:
@@ -220,7 +230,7 @@ void Player::onMediaStatusChanged(QMediaPlayer::MediaStatus status)
     }
 }
 
-void Player::onMetaDataChanged()
+void Player::readMetaData()
 {
     // 读取内嵌封面
     const QVariant coverVariant = m_mediaPlayer->metaData().value(QMediaMetaData::CoverArtImage);
@@ -229,10 +239,19 @@ void Player::onMetaDataChanged()
         emit coverArtChanged(m_cachedCover);
     }
 
-    // 读取艺术家
+    // 读取艺术家（供缓存空缺时补充）
     const QString artist = currentArtist();
     if (!artist.isEmpty())
         emit artistChanged(artist);
 
+    // 读取专辑
+    const QString album = m_mediaPlayer->metaData().value(QMediaMetaData::AlbumTitle).toString();
+    if (!album.isEmpty())
+        emit albumChanged(album);
+}
+
+void Player::onMetaDataChanged()
+{
+    readMetaData();
     emit metaDataChanged();
 }

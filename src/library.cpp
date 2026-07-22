@@ -1,33 +1,101 @@
 #include "library.h"
 #include <QFileInfo>
+#include <QFile>
+#include <QDir>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QStandardPaths>
 
-// ── QSettings 键名 ──
-static const QString kKeyLastFolder    = QStringLiteral("lastFolder");
-static const QString kKeyPlaylist      = QStringLiteral("playlist/songs");
-static const QString kKeyPlaylistTitles    = QStringLiteral("playlist/titles");
-static const QString kKeyPlaylistArtists   = QStringLiteral("playlist/artists");
-static const QString kKeyPlaylistDurations = QStringLiteral("playlist/durations");
-static const QString kKeyCurrentIndex  = QStringLiteral("playlist/currentIndex");
-static const QString kKeyVolume        = QStringLiteral("audio/volume");
-static const QString kKeyMuted         = QStringLiteral("audio/muted");
-static const QString kKeyRepeatMode    = QStringLiteral("playback/repeatMode");
-static const QString kKeyShuffle       = QStringLiteral("playback/shuffle");
-static const QString kKeyLastPlayedSong = QStringLiteral("playback/lastPlayedSong");
-static const QString kKeyWindowGeom    = QStringLiteral("window/geometry");
+static const int kMaxRecentPositions = 50;
 
-static const int kMaxRecentPositions = 50;  // 最多记住 50 首歌的位置
+// ── JSON 键名 ──
+static const QString kAppDir = QStringLiteral("MusicPlayer");
+static const QString kFile   = QStringLiteral("library.json");
 
 // ════════════════════════════════════════════════════════════
-//  构造 / 析构
+//  构造 / 析构 — 启动时加载整个 JSON
 // ════════════════════════════════════════════════════════════
 
 Library::Library(QObject *parent)
     : QObject(parent)
-    , m_settings(QStringLiteral("MusicPlayer"), QStringLiteral("MusicPlayer"))
 {
+    // 存放在标准应用数据目录
+    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dataDir);
+    m_filePath = dataDir + QStringLiteral("/") + kFile;
+    loadFromFile();
 }
 
 Library::~Library() = default;
+
+QString Library::filePath() const
+{
+    return m_filePath;
+}
+
+// ════════════════════════════════════════════════════════════
+//  内部 — 文件 I/O
+// ════════════════════════════════════════════════════════════
+
+void Library::loadFromFile()
+{
+    QFile file(m_filePath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return;
+
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    file.close();
+
+    if (doc.isObject())
+        m_data = doc.object();
+}
+
+void Library::saveToFile()
+{
+    QFile file(m_filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("Library: failed to write %s", qPrintable(m_filePath));
+        return;
+    }
+
+    QJsonDocument doc(m_data);
+    file.write(doc.toJson(QJsonDocument::Indented));
+    file.close();
+}
+
+// ════════════════════════════════════════════════════════════
+//  辅助 — Song ↔ QJsonObject 转换
+// ════════════════════════════════════════════════════════════
+
+static QJsonObject songToJson(const Song &s)
+{
+    QJsonObject obj;
+    obj[QStringLiteral("path")]     = s.filePath;
+    obj[QStringLiteral("title")]    = s.title;
+    obj[QStringLiteral("artist")]   = s.artist;
+    obj[QStringLiteral("album")]    = s.album;
+    obj[QStringLiteral("duration")] = static_cast<qint64>(s.durationMs);
+    return obj;
+}
+
+static Song songFromJson(const QJsonObject &obj)
+{
+    Song s;
+    s.filePath   = obj[QStringLiteral("path")].toString();
+    s.title      = obj[QStringLiteral("title")].toString();
+    s.artist     = obj[QStringLiteral("artist")].toString();
+    s.album      = obj[QStringLiteral("album")].toString();
+    s.durationMs = static_cast<qint64>(obj[QStringLiteral("duration")].toDouble());
+    // 重新探测歌词/封面路径（文件可能已被移动）
+    if (!s.filePath.isEmpty()) {
+        QFileInfo fi(s.filePath);
+        if (fi.exists()) {
+            s.lyricsPath = Song::detectLyricsFile(s.filePath);
+            s.coverPath  = Song::detectCoverFile(s.filePath);
+        }
+    }
+    return s;
+}
 
 // ════════════════════════════════════════════════════════════
 //  上次文件夹
@@ -35,13 +103,13 @@ Library::~Library() = default;
 
 void Library::saveLastFolder(const QString &folderPath)
 {
-    m_settings.setValue(kKeyLastFolder, folderPath);
-    m_settings.sync();
+    m_data[QStringLiteral("lastFolder")] = folderPath;
+    saveToFile();
 }
 
 QString Library::loadLastFolder() const
 {
-    return m_settings.value(kKeyLastFolder).toString();
+    return m_data.value(QStringLiteral("lastFolder")).toString();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -50,62 +118,35 @@ QString Library::loadLastFolder() const
 
 void Library::savePlaylist(const QList<Song> &songs, int currentIndex)
 {
-    QStringList paths, titles, artists;
-    QList<qint64> durations;
-    paths.reserve(songs.size());
-    titles.reserve(songs.size());
-    artists.reserve(songs.size());
-    durations.reserve(songs.size());
-    for (const auto &song : songs) {
-        paths.append(song.filePath);
-        titles.append(song.title);
-        artists.append(song.artist);
-        durations.append(song.durationMs);
-    }
+    QJsonArray arr;
+    for (const auto &s : songs)
+        arr.append(songToJson(s));
 
-    m_settings.setValue(kKeyPlaylist, paths);
-    m_settings.setValue(kKeyPlaylistTitles, titles);
-    m_settings.setValue(kKeyPlaylistArtists, artists);
-    m_settings.setValue(kKeyPlaylistDurations, QVariant::fromValue(durations));
-    m_settings.setValue(kKeyCurrentIndex, currentIndex);
-    m_settings.sync();
+    QJsonObject pl;
+    pl[QStringLiteral("songs")]        = arr;
+    pl[QStringLiteral("currentIndex")] = currentIndex;
+
+    m_data[QStringLiteral("playlist")] = pl;
+    saveToFile();
 }
 
 QList<Song> Library::loadPlaylist(int &outCurrentIndex) const
 {
-    outCurrentIndex = m_settings.value(kKeyCurrentIndex, -1).toInt();
+    QList<Song> result;
+    const QJsonObject pl = m_data.value(QStringLiteral("playlist")).toObject();
+    outCurrentIndex = pl.value(QStringLiteral("currentIndex")).toInt(-1);
 
-    const QStringList paths     = m_settings.value(kKeyPlaylist).toStringList();
-    const QStringList titles    = m_settings.value(kKeyPlaylistTitles).toStringList();
-    const QStringList artists   = m_settings.value(kKeyPlaylistArtists).toStringList();
-    const QList<QVariant> durVar = m_settings.value(kKeyPlaylistDurations).toList();
-
-    QList<Song> songs;
-    songs.reserve(paths.size());
-
-    for (int i = 0; i < paths.size(); ++i) {
-        const QString &path = paths.at(i);
-        if (!QFileInfo::exists(path))
-            continue;
-
-        Song song(path);
-        // 恢复保存的标题（不是文件名 completeBaseName）
-        if (i < titles.size() && !titles.at(i).isEmpty())
-            song.title = titles.at(i);
-        // 恢复保存的艺术家（避免重启后丢失）
-        if (i < artists.size() && !artists.at(i).isEmpty())
-            song.artist = artists.at(i);
-        // 恢复保存的时长
-        if (i < durVar.size() && durVar.at(i).isValid())
-            song.durationMs = durVar.at(i).toLongLong();
-        songs.append(song);
+    const QJsonArray arr = pl.value(QStringLiteral("songs")).toArray();
+    for (const auto &v : arr) {
+        Song s = songFromJson(v.toObject());
+        if (QFileInfo::exists(s.filePath))
+            result.append(s);
     }
 
-    // 修正越界的索引
-    if (outCurrentIndex >= songs.size())
-        outCurrentIndex = songs.isEmpty() ? -1 : 0;
+    if (outCurrentIndex >= result.size())
+        outCurrentIndex = result.isEmpty() ? -1 : 0;
 
-    return songs;
+    return result;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -114,24 +155,30 @@ QList<Song> Library::loadPlaylist(int &outCurrentIndex) const
 
 void Library::saveVolume(int percent)
 {
-    m_settings.setValue(kKeyVolume, percent);
-    m_settings.sync();
+    QJsonObject audio = m_data.value(QStringLiteral("audio")).toObject();
+    audio[QStringLiteral("volume")] = percent;
+    m_data[QStringLiteral("audio")] = audio;
+    saveToFile();
 }
 
 int Library::loadVolume(int defaultPercent) const
 {
-    return m_settings.value(kKeyVolume, defaultPercent).toInt();
+    return m_data.value(QStringLiteral("audio")).toObject()
+           .value(QStringLiteral("volume")).toInt(defaultPercent);
 }
 
 void Library::saveMuted(bool muted)
 {
-    m_settings.setValue(kKeyMuted, muted);
-    m_settings.sync();
+    QJsonObject audio = m_data.value(QStringLiteral("audio")).toObject();
+    audio[QStringLiteral("muted")] = muted;
+    m_data[QStringLiteral("audio")] = audio;
+    saveToFile();
 }
 
 bool Library::loadMuted(bool defaultMuted) const
 {
-    return m_settings.value(kKeyMuted, defaultMuted).toBool();
+    return m_data.value(QStringLiteral("audio")).toObject()
+           .value(QStringLiteral("muted")).toBool(defaultMuted);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -140,24 +187,30 @@ bool Library::loadMuted(bool defaultMuted) const
 
 void Library::saveRepeatMode(int mode)
 {
-    m_settings.setValue(kKeyRepeatMode, mode);
-    m_settings.sync();
+    QJsonObject pb = m_data.value(QStringLiteral("playback")).toObject();
+    pb[QStringLiteral("repeatMode")] = mode;
+    m_data[QStringLiteral("playback")] = pb;
+    saveToFile();
 }
 
 int Library::loadRepeatMode(int defaultMode) const
 {
-    return m_settings.value(kKeyRepeatMode, defaultMode).toInt();
+    return m_data.value(QStringLiteral("playback")).toObject()
+           .value(QStringLiteral("repeatMode")).toInt(defaultMode);
 }
 
 void Library::saveShuffle(bool enabled)
 {
-    m_settings.setValue(kKeyShuffle, enabled);
-    m_settings.sync();
+    QJsonObject pb = m_data.value(QStringLiteral("playback")).toObject();
+    pb[QStringLiteral("shuffle")] = enabled;
+    m_data[QStringLiteral("playback")] = pb;
+    saveToFile();
 }
 
 bool Library::loadShuffle(bool defaultShuffle) const
 {
-    return m_settings.value(kKeyShuffle, defaultShuffle).toBool();
+    return m_data.value(QStringLiteral("playback")).toObject()
+           .value(QStringLiteral("shuffle")).toBool(defaultShuffle);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -166,13 +219,16 @@ bool Library::loadShuffle(bool defaultShuffle) const
 
 void Library::saveLastPlayedSong(const QString &songPath)
 {
-    m_settings.setValue(kKeyLastPlayedSong, songPath);
-    m_settings.sync();
+    QJsonObject pb = m_data.value(QStringLiteral("playback")).toObject();
+    pb[QStringLiteral("lastPlayedSong")] = songPath;
+    m_data[QStringLiteral("playback")] = pb;
+    saveToFile();
 }
 
 QString Library::loadLastPlayedSong() const
 {
-    return m_settings.value(kKeyLastPlayedSong).toString();
+    return m_data.value(QStringLiteral("playback")).toObject()
+           .value(QStringLiteral("lastPlayedSong")).toString();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -181,23 +237,22 @@ QString Library::loadLastPlayedSong() const
 
 void Library::saveLastPosition(const QString &songPath, qint64 positionMs)
 {
-    // 移除旧记录避免无限增长
-    QStringList allKeys = m_settings.allKeys().filter("position/");
-    if (allKeys.size() >= kMaxRecentPositions) {
-        // 简单地全部清理，保留当前这一条
-        for (const auto &key : allKeys)
-            m_settings.remove(key);
-    }
+    QJsonObject pos = m_data.value(QStringLiteral("positions")).toObject();
 
-    const QString key = QStringLiteral("position/") + songPath;
-    m_settings.setValue(key, static_cast<qlonglong>(positionMs));
-    m_settings.sync();
+    // 限制条目数量
+    if (pos.size() >= kMaxRecentPositions)
+        pos = QJsonObject();
+
+    pos[songPath] = static_cast<qint64>(positionMs);
+    m_data[QStringLiteral("positions")] = pos;
+    saveToFile();
 }
 
 qint64 Library::loadLastPosition(const QString &songPath) const
 {
-    const QString key = QStringLiteral("position/") + songPath;
-    return static_cast<qint64>(m_settings.value(key, 0).toLongLong());
+    return static_cast<qint64>(
+        m_data.value(QStringLiteral("positions")).toObject()
+        .value(songPath).toDouble(0));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -206,64 +261,134 @@ qint64 Library::loadLastPosition(const QString &songPath) const
 
 void Library::saveLyricsOffset(const QString &songPath, qint64 offsetMs)
 {
-    const QString key = QStringLiteral("lyricsoffset/") + songPath;
-    m_settings.setValue(key, static_cast<qlonglong>(offsetMs));
-    m_settings.sync();
+    QJsonObject off = m_data.value(QStringLiteral("lyricsOffsets")).toObject();
+    off[songPath] = static_cast<qint64>(offsetMs);
+    m_data[QStringLiteral("lyricsOffsets")] = off;
+    saveToFile();
 }
 
 qint64 Library::loadLyricsOffset(const QString &songPath, qint64 defaultOffset) const
 {
-    const QString key = QStringLiteral("lyricsoffset/") + songPath;
-    return static_cast<qint64>(m_settings.value(key, static_cast<qlonglong>(defaultOffset)).toLongLong());
+    return static_cast<qint64>(
+        m_data.value(QStringLiteral("lyricsOffsets")).toObject()
+        .value(songPath).toDouble(static_cast<double>(defaultOffset)));
 }
 
-// ════════════════════════════════════════════════════════════
-//  窗口几何
 // ════════════════════════════════════════════════════════════
 //  主题
 // ════════════════════════════════════════════════════════════
 
-static const QString kKeyTheme = QStringLiteral("app/theme");
-
 void Library::saveTheme(int theme)
 {
-    m_settings.setValue(kKeyTheme, theme);
-    m_settings.sync();
+    QJsonObject app = m_data.value(QStringLiteral("app")).toObject();
+    app[QStringLiteral("theme")] = theme;
+    m_data[QStringLiteral("app")] = app;
+    saveToFile();
 }
 
 int Library::loadTheme(int defaultTheme) const
 {
-    return m_settings.value(kKeyTheme, defaultTheme).toInt();
+    return m_data.value(QStringLiteral("app")).toObject()
+           .value(QStringLiteral("theme")).toInt(defaultTheme);
 }
 
 // ════════════════════════════════════════════════════════════
 //  DIY 背景
 // ════════════════════════════════════════════════════════════
 
-static const QString kKeyDiyBg = QStringLiteral("app/diyBgFolder");
-
 void Library::saveDiyBgFolder(const QString &folderPath)
 {
-    m_settings.setValue(kKeyDiyBg, folderPath);
-    m_settings.sync();
+    QJsonObject app = m_data.value(QStringLiteral("app")).toObject();
+    app[QStringLiteral("diyBgFolder")] = folderPath;
+    m_data[QStringLiteral("app")] = app;
+    saveToFile();
 }
 
 QString Library::loadDiyBgFolder() const
 {
-    return m_settings.value(kKeyDiyBg).toString();
+    return m_data.value(QStringLiteral("app")).toObject()
+           .value(QStringLiteral("diyBgFolder")).toString();
 }
 
+// ════════════════════════════════════════════════════════════
+//  窗口几何
 // ════════════════════════════════════════════════════════════
 
 void Library::saveWindowGeometry(const QByteArray &geometry)
 {
-    m_settings.setValue(kKeyWindowGeom, geometry);
-    m_settings.sync();
+    // Base64 编码存储二进制几何数据
+    m_data[QStringLiteral("windowGeometry")] =
+        QString::fromLatin1(geometry.toBase64());
+    saveToFile();
 }
 
 QByteArray Library::loadWindowGeometry() const
 {
-    return m_settings.value(kKeyWindowGeom).toByteArray();
+    return QByteArray::fromBase64(
+        m_data.value(QStringLiteral("windowGeometry")).toString().toLatin1());
+}
+
+// ════════════════════════════════════════════════════════════
+//  歌单数据（PlaylistManager）
+// ════════════════════════════════════════════════════════════
+
+void Library::savePlaylists(const QJsonArray &data)
+{
+    m_data[QStringLiteral("playlists")] = data;
+    saveToFile();
+}
+
+QJsonArray Library::loadPlaylists() const
+{
+    return m_data.value(QStringLiteral("playlists")).toArray();
+}
+
+// ════════════════════════════════════════════════════════════
+//  文件夹扫描缓存
+// ════════════════════════════════════════════════════════════
+
+void Library::cacheFolderSongs(const QString &folderPath, const QList<Song> &songs)
+{
+    QJsonObject folderCache = m_data.value(QStringLiteral("folderCache")).toObject();
+    QJsonArray arr;
+    for (const auto &s : songs)
+        arr.append(songToJson(s));
+    folderCache[folderPath] = arr;
+    m_data[QStringLiteral("folderCache")] = folderCache;
+    saveToFile();
+}
+
+QList<Song> Library::loadCachedFolderSongs(const QString &folderPath) const
+{
+    QList<Song> result;
+    const QJsonObject folderCache = m_data.value(QStringLiteral("folderCache")).toObject();
+    const QJsonArray arr = folderCache.value(folderPath).toArray();
+    for (const auto &v : arr) {
+        Song s = songFromJson(v.toObject());
+        if (QFileInfo::exists(s.filePath))
+            result.append(s);
+    }
+    return result;
+}
+
+bool Library::hasFolderCache(const QString &folderPath) const
+{
+    return m_data.value(QStringLiteral("folderCache")).toObject()
+           .contains(folderPath);
+}
+
+void Library::clearFolderCache()
+{
+    m_data.remove(QStringLiteral("folderCache"));
+    saveToFile();
+}
+
+void Library::clearFolderCacheFor(const QString &folderPath)
+{
+    QJsonObject folderCache = m_data.value(QStringLiteral("folderCache")).toObject();
+    folderCache.remove(folderPath);
+    m_data[QStringLiteral("folderCache")] = folderCache;
+    saveToFile();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -272,11 +397,6 @@ QByteArray Library::loadWindowGeometry() const
 
 void Library::clearAll()
 {
-    m_settings.clear();
-    m_settings.sync();
-}
-
-QString Library::settingsFilePath() const
-{
-    return m_settings.fileName();
+    m_data = QJsonObject();
+    saveToFile();
 }

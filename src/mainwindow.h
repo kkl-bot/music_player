@@ -24,6 +24,7 @@ class Playlist;
 class PlayTrack;
 class LyricsDecoder;
 class Library;
+class PlaylistManager;
 class Song;
 class ConversionDialog;
 class AudioVisualizer;
@@ -74,6 +75,30 @@ private:
     /// 搜索过滤
     void onSearchTextChanged(const QString &text);
 
+    // ── 歌单管理 ──
+    /// 歌单选择器选中变化
+    void onPlaylistSelectorSelected(int index);
+    /// 新建歌单
+    void onNewPlaylist();
+    /// 删除当前选中的歌单
+    void onDeletePlaylist();
+    /// 歌曲列表点击（考虑分类模式）
+    void onSongListItemClicked(int index);
+    /// 右键菜单：添加到歌单
+    void onAddToPlaylistMenu(const QString &songPath);
+    /// 重建歌单选择器列表 UI
+    void rebuildPlaylistSelector();
+    /// 在重建后恢复歌单选择器选中项
+    void restorePlaylistSelectorSelection();
+    /// 根据当前视图重建歌曲列表
+    void rebuildSongList();
+    /// 显示分类列表（歌手/专辑）
+    void showCategoryList(bool isArtist);
+    /// 保存歌单数据到 Library
+    void savePlaylistData();
+    /// 从 Library 恢复歌单数据
+    void restorePlaylistData();
+
     // ── 主题切换 ──
     void switchTheme(Style::Theme theme);
     void onToggleTheme();
@@ -106,6 +131,9 @@ private:
     /// 封面自适应：将缓存的封面缩放到当前标签尺寸
     void updateCoverDisplay();
 
+    /// 更新艺术家/专辑显示
+    void updateArtistAlbumDisplay();
+
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
 
@@ -115,9 +143,13 @@ protected:
     PlayTrack     *m_playTrack     = nullptr;
     LyricsDecoder *m_subtitle     = nullptr;
     Library       *m_library       = nullptr;
+    PlaylistManager *m_playlistManager = nullptr;
 
     // ── 左侧面板（可切换） ──
     QWidget       *m_leftPanel      = nullptr;
+    QListWidget   *m_playlistList   = nullptr;   // 歌单选择器（新增）
+    QPushButton   *m_btnNewPlaylist = nullptr;   // 新建歌单按钮
+    QPushButton   *m_btnDeletePlaylist = nullptr;// 删除歌单按钮
     QLineEdit     *m_searchBox      = nullptr;   // 搜索框
     QListWidget   *m_listWidget     = nullptr;
     QLabel        *m_listCountLabel = nullptr;
@@ -173,6 +205,20 @@ protected:
 
     // ── Fleet-Snowfluff 特效 ──
     FleetEffects *m_fleetFx = nullptr;
+
+    // ── 歌单视图状态 ──
+    /// 列表显示模式
+    enum class ListMode {
+        AllSongs,       // 所有歌曲
+        UserPlaylist,   // 用户歌单
+        ByArtist,       // 按歌手（显示歌手名列表）
+        ByAlbum,        // 按专辑（显示专辑名列表）
+        ArtistSongs,    // 某歌手的歌曲
+        AlbumSongs,     // 某专辑的歌曲
+    };
+    ListMode m_listMode = ListMode::AllSongs;
+    /// 当前选中的歌单名 / 歌手名 / 专辑名（空 = 全部）
+    QString m_currentFilterName;
 
     // ── 状态追踪 ──
     Style::Theme m_currentTheme = Style::Dark;

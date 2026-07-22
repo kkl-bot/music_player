@@ -38,13 +38,13 @@ public:
     QString durationString() const;             // "03:45" 格式的时长字符串
     bool    isValid() const;                    // filePath 非空且文件存在
 
+    // ── 自动探测 ──
+    static QString detectLyricsFile(const QString &audioPath);
+    static QString detectCoverFile(const QString &audioPath);
+
     // ── 序列化 ──
     QString toString() const;                   // 调试用
     static Song fromFileInfo(const QFileInfo &fi);
-
-private:
-    static QString detectLyricsFile(const QString &audioPath);
-    static QString detectCoverFile(const QString &audioPath);
 };
 
 // 比较 / 排序

@@ -60,6 +60,7 @@ public:
 
     // ── 元数据查询 ──
     QString currentArtist() const;
+    QString currentAlbum() const;
     QString currentTitle() const;
     QPixmap currentCoverArt() const;
 
@@ -78,6 +79,7 @@ signals:
     /// 元数据变更（艺术家、封面等就绪时发射）
     void metaDataChanged();
     void artistChanged(const QString &artist);
+    void albumChanged(const QString &album);
     void coverArtChanged(const QPixmap &cover);
 
 private slots:
@@ -87,6 +89,7 @@ private slots:
     void onDurationChanged(qint64 durationMs);
     void onMediaStatusChanged(QMediaPlayer::MediaStatus status);
     void onMetaDataChanged();
+    void readMetaData();
 
 private:
     QMediaPlayer  *m_mediaPlayer  = nullptr;
