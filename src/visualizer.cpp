@@ -57,9 +57,16 @@ AudioVisualizer::AudioVisualizer(QMediaPlayer *player, QWidget *parent)
 
     // 控制按钮栏
     setupControlBar();
-
-    // 启动动画定时器（60fps ≈ 16.6ms）
-    m_animTimerId = startTimer(16, Qt::PreciseTimer);
+    // 跟踪播放状态变化（暂停时完整冻结可视化）
+    if (m_mediaPlayer) {
+        connect(m_mediaPlayer, &QMediaPlayer::playbackStateChanged,
+                this, [this](QMediaPlayer::PlaybackState state) {
+            m_isPlaying = (state == QMediaPlayer::PlayingState);
+        });
+        m_isPlaying = (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState);
+    }
+    // 启动动画定时器（24fps ≈43ms）
+    m_animTimerId = startTimer(43, Qt::PreciseTimer);
 }
 
 AudioVisualizer::~AudioVisualizer()
@@ -281,22 +288,27 @@ void AudioVisualizer::processPcmData(const QByteArray &data,
 
     const qint16 *samples = reinterpret_cast<const qint16*>(data.constData());
 
-    // 计算音量（RMS，取所有声道平均）
-    double rms = 0.0;
+    // ── 参考 getPcmDB16 方法计算音量 ——
+    // avg = sum(abs(value)) / n,  db = 20·log10(avg)
     {
-        double sum = 0.0;
-        int validFrames = 0;
-        for (int i = 0; i + channels <= sampleCount; i += channels) {
-            double s = 0.0;
+        double sumAbs = 0.0;
+        int totalFrames = sampleCount / channels;
+        for (int i = 0; i < totalFrames; ++i) {
+            double frameVal = 0.0;
             for (int ch = 0; ch < channels; ++ch)
-                s += samples[i + ch] / 32768.0;
-            s /= channels;
-            sum += s * s;
-            validFrames++;
+                frameVal += std::abs(samples[i * channels + ch]);
+            sumAbs += frameVal / channels;
         }
-        rms = validFrames > 0 ? std::sqrt(sum / validFrames) : 0.0;
+        double avgAmplitude = sumAbs / totalFrames;
+        // avgAmplitude 范围 0~32768, 20*log10(32768) ≈ 90.3 dB
+        if (avgAmplitude > 1.0) {
+            double db = 20.0 * std::log10(avgAmplitude);
+            // 映射 -10..80 dB 到 0..1（80 dB = 满量程附近）
+            m_volumeLevel = std::clamp((db + 10.0) / 70.0, 0.0, 1.0);
+        } else {
+            m_volumeLevel = 0.0;
+        }
     }
-    m_volumeLevel = std::min(rms * 4.0, 1.0);
     m_smoothVolume += (m_volumeLevel - m_smoothVolume) * 0.3;
 
     // 降采样波形数据（取所有声道平均）
@@ -381,18 +393,103 @@ void AudioVisualizer::computeFft(QVector<double> &samples)
         }
     }
 
-    // 计算幅值谱（只取前一半）
+    // ── 计算幅值谱，然后按频带分组求平均，再做 dB 转换（参考 getPcmDB16） ──
     int half = n / 2;
-    m_fftData.resize(half);
-    for (int i = 0; i < half; ++i) {
-        m_fftData[i] = std::sqrt(re[i] * re[i] + im[i] * im[i]) / half;
-        // 转 dB
-        if (m_fftData[i] > 1e-10)
-            m_fftData[i] = 20.0 * std::log10(m_fftData[i]);
-        else
-            m_fftData[i] = -80.0;
-        // 归一化到 0~1
-        m_fftData[i] = std::clamp((m_fftData[i] + 80.0) / 80.0, 0.0, 1.0);
+    QVector<double> mags(half);
+    for (int i = 0; i < half; ++i)
+        mags[i] = std::sqrt(re[i] * re[i] + im[i] * im[i]) / half;
+
+    // 保留完整 FFT 数据供 detectBeat 使用
+    m_fftData = mags;
+
+    // ── 按 3 段频率分段，柱子数按 FFT bin 之比动态计算 ──
+    struct FreqSegment {
+        double freqLo, freqHi;
+    };
+    constexpr FreqSegment kSegments[] = {
+        {  20.0,  200.0  },   // 低频 20-200 Hz
+        { 200.0, 2000.0  },   // 中频 200 Hz-2 kHz
+        {2000.0, 20000.0 },   // 高频 2-20 kHz
+    };
+    constexpr int kSegCount = sizeof(kSegments) / sizeof(kSegments[0]);
+    const double nyquist = m_sampleRate > 0 ? m_sampleRate / 2.0 : 22050.0;
+    const double binHz = nyquist / half;   // 每个 FFT bin 的频率宽度
+
+    // 先统计各段 bin 数，高频区均匀截取最多 20 个有效 bin
+    int segBins[kSegCount];
+    int totalBinsAll = 0;
+    for (int s = 0; s < kSegCount; ++s) {
+        int lo = qMax(1,       static_cast<int>(kSegments[s].freqLo / binHz));
+        int hi = qMin(half - 1, static_cast<int>(kSegments[s].freqHi / binHz));
+        if (hi < lo) hi = lo;
+        segBins[s] = hi - lo + 1;
+    }
+    // 高频区：从完整 bin 范围中均匀抽取 20 个代表 bin，其余段保持原样
+    segBins[kSegCount - 1] = qMin(segBins[kSegCount - 1], 20);
+    for (int s = 0; s < kSegCount; ++s)
+        totalBinsAll += segBins[s];
+
+    // 按 bin 比例分配 kBarCount 根柱子，每段至少 1 根
+    int segBars[kSegCount];
+    int assigned = 0;
+    for (int s = 0; s < kSegCount - 1; ++s) {
+        segBars[s] = qMax(1, static_cast<int>(kBarCount * segBins[s] / totalBinsAll));
+        assigned += segBars[s];
+    }
+    segBars[kSegCount - 1] = kBarCount - assigned;   // 最后一段补齐
+
+    int barIdx = 0;
+    for (int seg = 0; seg < kSegCount; ++seg) {
+        int binLo = qMax(1,       static_cast<int>(kSegments[seg].freqLo / binHz));
+        int binHi = qMin(half - 1, static_cast<int>(kSegments[seg].freqHi / binHz));
+        if (binHi < binLo) binHi = binLo;
+
+        int totalBins = binHi - binLo + 1;
+        int segBarsCount = segBars[seg];
+
+        // ── 高频区：从完整 bin 中均匀抽取 20 个代表点 ──
+        QVector<double> sampledMags;
+        if (seg == kSegCount - 1) {
+            constexpr int kHfSamples = 20;
+            sampledMags.resize(kHfSamples);
+            for (int s = 0; s < kHfSamples; ++s) {
+                int idx = binLo + s * totalBins / kHfSamples;
+                // 取相邻 bins 平均作为代表值
+                int r = qMin(totalBins - 1, totalBins / kHfSamples);
+                double acc = 0.0;
+                int n = 0;
+                for (int j = qMax(binLo, idx - r/2); j <= qMin(binHi, idx + r/2); ++j) {
+                    acc += mags[j];
+                    n++;
+                }
+                sampledMags[s] = n > 0 ? acc / n : 0.0;
+            }
+        }
+
+        const double *pMags = (seg == kSegCount - 1) ? sampledMags.constData() : mags.constData();
+        int pMagCount = (seg == kSegCount - 1) ? sampledMags.size() : totalBins;
+
+        for (int b = 0; b < segBarsCount && barIdx < kBarCount; ++b, ++barIdx) {
+            // 浮点分布避免柱子数 > 代表点数时的缺失问题
+            int barLo = (int)( (double)b       * pMagCount / segBarsCount );
+            int barHi = (int)( (double)(b + 1) * pMagCount / segBarsCount ) - 1;
+            if (barHi < barLo) barHi = barLo;
+            barLo = qBound(0, barLo, pMagCount - 1);
+            barHi = qBound(barLo, barHi, pMagCount - 1);
+
+            double sum = 0.0;
+            int count = 0;
+            for (int i = barLo; i <= barHi; ++i) {
+                sum += pMags[i];
+                count++;
+            }
+
+            double avgMag = count > 0 ? sum / count : 0.0;
+
+            // ── ① dB 转换：db = 20·log10(raw_mag + ε)，ε 防止 log(0) ──
+            constexpr double kEps = 1e-10;
+            m_barRaw[barIdx] = 20.0 * std::log10(avgMag + kEps);
+        }
     }
 }
 
@@ -517,80 +614,50 @@ void AudioVisualizer::paintEvent(QPaintEvent *)
 
 void AudioVisualizer::drawSpectrum(QPainter &p, const QRect &rect)
 {
-    if (m_fftData.isEmpty()) return;
+    // ════════════════════════════════════════════════════════════════
+    //  Y 轴计算管线（全链路重写）
+    // ════════════════════════════════════════════════════════════════
+    //
+    //  ① dB 转换    → 已于 computeFft 中完成，m_barRaw 存的是原始 dB 值
+    //  ② 范围裁剪    → min_db ~ max_db
+    //  ③ 归一化      → (db - min_db) / (max_db - min_db)  → [0, 1]
+    //  ④ 指数曲线    → y = normalized ^ power
+    //  ⑤ 平滑（EMA） → smoothed = factor * y + (1-factor) * prev
+    //  ⑥ 像素映射    → pixel_h = smoothed * max_height
+    // ════════════════════════════════════════════════════════════════
 
-    // ── 动态频率范围检测 ──
-    // 从 FFT 数据中找到有实际能量的频段，使运动柱子居中占据 ≥80%
-    const int fftLen = m_fftData.size();
-    constexpr double kEnergyThresh = 0.04;
-
-    int binStart = 1;   // 跳过 DC (bin 0)
-    int binEnd   = fftLen - 1;
-
-    // 找到第一个有能量的 bin
-    while (binStart < fftLen - 2 && m_fftData[binStart] < kEnergyThresh)
-        binStart++;
-
-    // 找到最后一个有能量的 bin（从后往前）
-    while (binEnd > binStart + 5 && m_fftData[binEnd] < kEnergyThresh)
-        binEnd--;
-
-    // 如果整个范围太小或者检测失败，回退到一个合理的默认范围
-    int activeRange = binEnd - binStart;
-    if (activeRange < 10) {
-        binStart = 2;
-        binEnd   = qMin(fftLen / 2, 200);
-        activeRange = binEnd - binStart;
-    }
-
-    // 动态收窄：再取能量集中区域（去掉头尾 5% 的边缘）
-    int margin = activeRange / 20;  // 5%
-    binStart += margin;
-    binEnd   -= margin;
-    activeRange = binEnd - binStart;
-    if (activeRange < 8) {
-        binStart = 2;
-        binEnd   = qMin(fftLen / 2, 180);
-        activeRange = binEnd - binStart;
-    }
-
-    // ── 对数频率带分组 ──
-    // 将活动频段映射到 kBarCount 个柱子上
-    double bandEnergy[kBarCount] = {};
-    for (int b = 0; b < kBarCount; ++b) {
-        // 用 sigmoid-like 曲线让柱子分布更均匀地覆盖活动频段
-        double f = double(b) / kBarCount;
-        double curve = f * f * (3.0 - 2.0 * f);  // smoothstep: 中间密、两端疏
-        int idx = binStart + int(curve * activeRange);
-        idx = qBound(binStart, idx, binEnd);
-        bandEnergy[b] = m_fftData[idx];
-    }
-
-    // ── Attack / Decay 平滑 ──
-    constexpr double kAttack = 0.50;
-    constexpr double kDecay  = 0.88;
-    constexpr double kPeakDecay = 0.95;
-    constexpr int    kPeakMaxAge = 25;
+    constexpr double kMinDb     = -80.0;
+    constexpr double kMaxDb     =   0.0;
+    constexpr double kDbRange   = kMaxDb - kMinDb;   // 80
+    constexpr double kPower     =   1.0;              // 指数曲线（1=线性）
+    constexpr double kSmooth    =   0.35;             // EMA 平滑因子
 
     for (int b = 0; b < kBarCount; ++b) {
-        double raw = bandEnergy[b];
-        if (raw > m_barLevel[b])
-            m_barLevel[b] += (raw - m_barLevel[b]) * kAttack;
-        else
-            m_barLevel[b] += (raw - m_barLevel[b]) * (1.0 - kDecay);
-        m_barLevel[b] = qBound(0.0, m_barLevel[b], 1.0);
+        // ② 范围裁剪
+        double db = qMax(m_barRaw[b], kMinDb);
 
+        // ③ 归一化到 [0, 1]
+        double normalized = (db - kMinDb) / kDbRange;
+
+        // ④ 指数曲线调整
+        double curved = std::pow(normalized, kPower);
+
+        // ⑤ EMA 平滑（替换旧的 attack/decay）
+        m_barLevel[b] = kSmooth * curved + (1.0 - kSmooth) * m_barLevel[b];
+        if (m_barLevel[b] < 1e-6) m_barLevel[b] = 0.0;
+
+        // 峰值跟踪
         if (m_barLevel[b] >= m_barPeak[b]) {
             m_barPeak[b] = m_barLevel[b];
             m_barPeakAge[b] = 0;
         } else {
             m_barPeakAge[b]++;
-            if (m_barPeakAge[b] > kPeakMaxAge)
-                m_barPeak[b] *= kPeakDecay;
+            if (m_barPeakAge[b] > 25)
+                m_barPeak[b] *= 0.95;
         }
     }
 
-    // ── 绘制 ──
+    // ⑥ 映射到像素高度
     const float totalW = float(rect.width());
     const float barW   = totalW / kBarCount;
     const float gap    = barW * 0.15f;
@@ -622,16 +689,7 @@ void AudioVisualizer::drawSpectrum(QPainter &p, const QRect &rect)
         grad.setColorAt(1.0, baseColor.darker(130));
         p.fillRect(QRectF(x, y, drawW, barH), grad);
 
-        // ── 顶部光晕 ──
-        if (barH > 3) {
-            QRadialGradient glow(x + drawW / 2, y, drawW * 2.5f);
-            QColor glowColor = baseColor;
-            glowColor.setAlpha(70);
-            glow.setColorAt(0.0, glowColor);
-            glowColor.setAlpha(0);
-            glow.setColorAt(1.0, glowColor);
-            p.fillRect(QRectF(x - drawW, y - 3, drawW * 3, 10), glow);
-        }
+        
 
         // ── 峰值标记：同色半透明方块 ──
         if (m_barPeak[b] > 0.02f) {
@@ -778,16 +836,23 @@ void AudioVisualizer::drawParticles(QPainter &p, const QRect &rect)
 void AudioVisualizer::timerEvent(QTimerEvent *event)
 {
     if (event->timerId() == m_animTimerId) {
-        // 更新粒子
-        updateParticles(1.0f / 60.0f);
+        // 双重确认：信号驱动 + 直接查询，确保暂停时真正冻结
+        const bool actuallyPlaying = m_mediaPlayer &&
+            (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState);
 
-        // ── 解码完成后，从缓冲区按播放位置持续提取数据 ──
-        if (m_decoderFinished && m_decodedBytes > 0 && m_mediaPlayer)
-            feedFrameAtPosition();
-
-        // 触发重绘
+        if (actuallyPlaying) {
+            // ── 播放中：正常更新粒子、音频数据、节拍 ──
+            updateParticles(1.0f / 24.0f);
+            if (m_decoderFinished && m_decodedBytes > 0)
+                feedFrameAtPosition();
+            m_beatStrength *= 0.97;
+            m_isPlaying = true;
+        } else {
+            // ── 暂停/停止：同步 m_isPlaying，完整冻结 ──
+            m_isPlaying = false;
+        }
+        // 保持重绘以显示最后一帧
         update();
-        m_beatStrength *= 0.97;
     }
     QWidget::timerEvent(event);
 }

@@ -121,6 +121,9 @@ private:
     // ── 动画 ──
     int  m_animTimerId = 0;
 
+    // ── 播放状态跟踪（信号驱动，用于暂停时完整冻结） ──
+    bool m_isPlaying = false;
+
     // ── 控制按钮 ──
     QWidget      *m_btnBar     = nullptr;
     QPushButton  *m_btnSpec    = nullptr;
@@ -131,9 +134,9 @@ private:
     // ── 频谱 MilkDrop 风格控制 ──
     static constexpr int kBarCount = 48;
     double m_barLevel[kBarCount]   = {};   // 当前平滑值
-    double m_barAttack[kBarCount]  = {};   // 快速上升跟踪
     double m_barPeak[kBarCount]    = {};   // 峰值保持
     int    m_barPeakAge[kBarCount] = {};   // 峰值保持时长
+    double m_barRaw[kBarCount]     = {};   // computeFft 输出的原始频带能量 (0~1)
 
     // ── FFT 辅助 ──
     static QVector<double> s_hannWindow;
