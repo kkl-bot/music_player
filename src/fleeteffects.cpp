@@ -36,8 +36,14 @@ FleetEffects::~FleetEffects()
 void FleetEffects::start()
 {
     m_enabled = true;
-    if (m_overlay)   m_overlay->show();
-    if (m_petLabel) { m_petLabel->raise(); m_petLabel->show(); }
+    if (m_overlay) {
+        m_overlay->show();
+        m_overlay->raise();
+    }
+    if (m_petLabel) {
+        m_petLabel->raise();
+        m_petLabel->show();
+    }
     if (m_fallTimer) m_fallTimer->start();
     if (m_animTimer) m_animTimer->start();
 }
@@ -364,37 +370,6 @@ void FleetEffects::updatePet()
 
     applyPetDirection();
 }
-
-// ════════════════════════════════════════════════════════════
-//  绘制（由 overlay 的 paintEvent 触发）
-// ════════════════════════════════════════════════════════════
-
-// 注：m_overlay 的绘制在构造函数中通过 eventFilter + update() 触发
-// 但 overlay 是普通 QWidget，我们需要子类化或重写 paintEvent。
-// 这里采用安装事件过滤器到 m_overlay 的 paintEvent 方案。
-// 实际使用中，我们会让 mainwindow 刷新时调用 overlay->update()。
-// 替代方案：在 timer 中直接画到 overlay。
-
-// 为了让粒子可绘制，我们在 animTimer 中让 overlay 刷新。
-// overlay 需要自定义 paintEvent。更简单：将 overlay 替换为一个
-// 自定义 QWidget 子类，但为了封装干净，我们用事件过滤器处理 paint。
-
-// 由于 QWidget 的 paint 不能通过 eventFilter 拦截，
-// 我们改为在 m_overlay 上安装事件过滤器，并处理 Paint 事件。
-
-// 但在 Qt 中，QEvent::Paint 不能通过 eventFilter 拦截并直接绘制。
-// 正确做法：子类化 OverlayWidget。
-
-// 简化方案：使用 lambda 连接 animTimer 直接绘制到 overlay 上。
-// 但 QWidget 绘制必须在 paintEvent 中。
-// 最终方案：在构造函数中重写 m_overlay 的 paintEvent 通过
-// 事件过滤器处理 QEvent::Paint。
-
-// 实际上 Qt 不允许 eventFilter 拦截 Paint 事件。
-// 我们改为：在 animTimer 中调用 m_overlay->update()，
-// 并让 m_overlay 使用事件过滤器… 但 paint 不行。
-
-// 最干净的方案：创建一个覆盖窗口类，内嵌在 fleeteffects.cpp 中。
 
 // ════════════════════════════════════════════════════════════
 //  OverlayWidget — 透明覆盖层，仅绘制粒子，鼠标穿透

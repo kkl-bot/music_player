@@ -48,7 +48,7 @@ set(HEADERS
 )
 
 # ── Executable ──
-add_executable(${PROJECT_NAME}
+add_executable(${PROJECT_NAME} WIN32
     ${SOURCES}
     ${HEADERS}
 )
@@ -77,6 +77,24 @@ set(FFMPEG_BIN_DIR "D:/programm/ffmpeg-2026-07-16-git-ceabc9b306-essentials_buil
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     FFMPEG_BIN_DIR="${FFMPEG_BIN_DIR}"
 )
+
+# ── 部署 Qt DLL（构建后自动拷贝到 exe 目录） ──
+find_package(Qt6 REQUIRED COMPONENTS Core)
+get_target_property(QT_DEPLOY_TOOL Qt6::windeployqt LOCATION)
+if(NOT QT_DEPLOY_TOOL)
+    # 回退到路径查找
+    get_filename_component(QT_BIN_DIR "${Qt6_DIR}/../../../bin" ABSOLUTE)
+    find_program(QT_DEPLOY_TOOL windeployqt HINTS "${QT_BIN_DIR}" NO_DEFAULT_PATH)
+endif()
+if(QT_DEPLOY_TOOL)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND "${QT_DEPLOY_TOOL}" "$<TARGET_FILE:${PROJECT_NAME}>"
+        COMMENT "▶ 正在部署 Qt DLL 到输出目录…"
+    )
+    message(STATUS "windeployqt: ${QT_DEPLOY_TOOL}")
+else()
+    message(WARNING "未找到 windeployqt, 需手动部署 Qt DLL")
+endif()
 
 # ── Compiler Warnings ──
 if(MSVC)
